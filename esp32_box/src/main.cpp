@@ -8,12 +8,12 @@
 #include "WiFi.h"
 #include "Wire.h"
 #include "LiquidCrystal_I2C.h"
+#include "credentials.h"
 
 
-#define TIMESECONDS 3
-#define WIFI_NETWORK "AndroidO"
-#define WIFI_PASSWORD "123456789"
+#define TIMESECONDS 3 // Delay between PIR sensor readings
 #define WIFI_TIMEOUT_MS 10000
+#define Threshold 40 /* Greater the value, more the sensitivity */
 
 // esp_now MAC adress of bed board
 uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x36, 0x58, 0xAC};

@@ -5,10 +5,9 @@
 #include <analogWrite.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include "credentials.h"
 
 //wifi credentials
-#define WIFI_NETWORK "AndroidO"
-#define WIFI_PASSWORD "123456789"
 #define WIFI_TIMEOUT_MS 10000
 
 // REPLACE WITH THE MAC Address of your receiver 
