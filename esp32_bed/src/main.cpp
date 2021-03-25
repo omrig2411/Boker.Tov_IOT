@@ -4,6 +4,7 @@
 #include "ESPAsyncWebServer.h"
 #include <analogWrite.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 
 //wifi credentials
 #define WIFI_NETWORK "AndroidO"
@@ -11,7 +12,7 @@
 #define WIFI_TIMEOUT_MS 10000
 
 // REPLACE WITH THE MAC Address of your receiver 
-uint8_t broadcastAddress[] = {0x24, 0x0A, 0xC4, 0xC5, 0x49, 0x38};
+uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x35, 0x32, 0x9C};
 
 const int WIFIpin = 25;
 
@@ -51,9 +52,8 @@ String success;
 esp_now_peer_info_t peerInfo;
 
 //wifi connection
-void connectToWiFi()
-{
-  Serial.print("connecting to wifi");
+void connectToWiFi() {
+  Serial.print("Connecting to wifi");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_NETWORK, WIFI_PASSWORD);
 
@@ -82,18 +82,18 @@ void connectToWiFi()
 
 //callback upon sending data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.println("Last Packet Send Status: ");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Fail" : "Delivery Success");
-  Serial.println("--------------------");
-  if (status ==1) {
-    success = "Delivery Success :)";
+  Serial.print("Send Status: ");
+  // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Fail" : "Delivery Success");
+  if (status == 0) {
+    Serial.println("Delivery Success :)");
   }else {
-  success = "Delivery Fail :(";
+    Serial.println("Delivery Fail :(");
   }
+  Serial.println("--------------------");
 }
 
 //callback upon recieving data
-void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len){
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&incomingStartCommand, incomingData, sizeof(incomingStartCommand));
   Serial.print("Bytes recieved: ");
   Serial.println(len);
@@ -105,18 +105,17 @@ void getReadings() {
   if (startDataCollection == 1){
     fsrReading1 = analogRead(fsrAnalogPin1);
     fsrReading2 = analogRead(fsrAnalogPin2);
-  }
+  } 
 }
 
 void updateDisplay() {
   //Serial monitor display
-  Serial.print("sensors start command: ");
+  Serial.print("sensors start: ");
   Serial.println(startDataCollection);
   Serial.println("--------------------");
 }
 
-void setup()
-{
+void setup() {
   // Serial port for debugging purposes
   Serial.begin(115200);
 
@@ -135,7 +134,12 @@ void setup()
   // Register peer
   // esp_now_peer_info_t peerInfo;
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;  
+  peerInfo.channel = 0; 
+  if (peerInfo.channel != WiFi.channel()) {
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_channel(WiFi.channel(), WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+  } 
   peerInfo.encrypt = false;
 
   // Add peer        
@@ -152,18 +156,12 @@ void setup()
   pinMode(WIFIpin, OUTPUT);
 }
 
-void loop()
-{
+void loop() {
   getReadings();
 
   // Set values to send
   outgoingReadings.FSR1 = fsrReading1;
   outgoingReadings.FSR2 = fsrReading2;
-
-  Serial.print("analog reading 1 = ");
-  Serial.println(fsrReading1);
-  Serial.print("analog reading 2 = ");
-  Serial.println(fsrReading2);
 
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outgoingReadings, sizeof(outgoingReadings));
 
@@ -173,6 +171,11 @@ void loop()
   else {
     Serial.println("Error sending the data");
   }
+
+  Serial.print("FSR 1 = ");
+  Serial.println(fsrReading1);
+  Serial.print("FSR 2 = ");
+  Serial.println(fsrReading2);
 
   // we'll need to change the range from the analog reading (0-1023) down to the range
   // used by analogWrite (0-255) with map!
@@ -185,13 +188,13 @@ void loop()
 
   Serial.println("--------------------");
 
-  updateDisplay();
-
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print("wifi Disconnected! ");
+  if (WiFi.status() != WL_CONNECTED){
+    Serial.println("wifi Disconnected! ");
     digitalWrite(WIFIpin, LOW);
     connectToWiFi();
   }
+
+  updateDisplay();
+  
   delay(1000);
 }

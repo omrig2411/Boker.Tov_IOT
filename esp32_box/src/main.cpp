@@ -4,6 +4,7 @@
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 #include "WiFi.h"
 #include "Wire.h"
 #include "LiquidCrystal_I2C.h"
@@ -15,7 +16,7 @@
 #define WIFI_TIMEOUT_MS 10000
 
 // esp_now MAC adress of bed board
-uint8_t broadcastAddress[] = {0x30, 0xAE, 0xA4, 0x99, 0xC6, 0x00};
+uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x36, 0x58, 0xAC};
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
@@ -40,17 +41,17 @@ boolean startTimer = false;
 // FSR variables
 int LEDbrightness1;
 int LEDbrightness2;
-const int FSRLEDpin1 = 32;
-const int FSRLEDpin2 = 33;
+const int FSRbuttonLEDpin1 = 32;
+const int FSRbuttonLEDpin2 = 33;
 
 // incoming data from esp32 bed board
 int incomingFSR1;      
 int incomingFSR2;
 
-// button variables
-const int buttonPin = 17;     // the number of the pushbutton pin
-const int ledPin =  18;      // the number of the LED pin
-int buttonState = 0;         // variable for reading the pushbutton status
+// // button variables
+// const int buttonPin = 17;     // the number of the pushbutton pin
+// const int buttonLEDpin =  18;      // the number of the LED pin
+// int buttonState = 0;         // variable for reading the pushbutton status
 
 // data to to be sent to esp32 bed board
 boolean startDataCollection;
@@ -78,8 +79,8 @@ esp_now_peer_info_t peerInfo;
 LiquidCrystal_I2C lcd(0x27, 20, 4); 
 
 //wifi connection
-void connectToWiFi(){
-  Serial.print("Connect wifi");
+void connectToWiFi() {
+  Serial.print("Connecting to wifi");
   lcd.clear();
   lcd.print("Connect wifi");
 
@@ -118,25 +119,25 @@ void connectToWiFi(){
   }
 }
 
-void currentTime(){
+void currentTime() {
     lcd.clear();
     lcd.print(timeClient.getFormattedTime());
 }
 
 //callback upon sending data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.println("Last Packet Send Status:");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Fail" : "Delivery Success");
-  Serial.println("--------------------");
-  if (status ==1) {
-    success = "Delivery Success :)";
+  Serial.print("Send Status:");
+  // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  if (status == 0) {
+    Serial.println("Delivery Success :)");
   }else {
-  success = "Delivery Fail :(";
+    Serial.println("Delivery Fail :(");
   }
+  Serial.println("--------------------");
 }
 
 //callback upon recieving data
-void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len){
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
   Serial.print("Bytes recieved: ");
   Serial.println(len);
@@ -146,40 +147,41 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len){
 
 //used to trigger data collection in the bed board
 void getReadings() {
-  // read the state of the pushbutton value:
-  buttonState = digitalRead(buttonPin);
-  Serial.println(buttonState);
-  
-  startDataCollection = buttonState;
+  startDataCollection = 1;
 
-  // check if the pushbutton is pressed. If it is, the buttonState is HIGH:
-  if (buttonState == HIGH) {
-    // turn LED on:
-    digitalWrite(ledPin, HIGH);
-  } else {
-    // turn LED off:
-    digitalWrite(ledPin, LOW);
-  }
+  // // read the state of the pushbutton value:
+  // buttonState = digitalRead(buttonPin);
+  // Serial.print("Button state: ");
+  // Serial.print(buttonState);
+
+
+  // // check if the pushbutton is pressed. If it is, the buttonState is HIGH:
+  // if (buttonState == HIGH) {
+  //   // turn LED on:
+  //   digitalWrite(buttonLEDpin, HIGH);
+  //   startDataCollection = buttonState;
+  // } else {
+  //   // turn LED off:
+  //   digitalWrite(buttonLEDpin, LOW);
+  //   startDataCollection = buttonState;
+  // }
 }
 
 void updateDisplay() {
-  lcd.clear();
-  lcd.print("bed movements:");
   lcd.setCursor(0, 1);
   lcd.print("1: ");
-  lcd.print(incomingFSR1 + " ");
-  lcd.print("2: ");
-  lcd.println(incomingFSR2 + " ");
+  lcd.print(incomingFSR1);
+  lcd.print(" 2: ");
+  lcd.println(incomingFSR2);
 
   //Serial monitor display
-  Serial.println("bed movements:");
+  Serial.println("sensor readings:");
   Serial.print("FSR1: ");
   Serial.println(incomingFSR1);
   Serial.print("FSR2: ");
   Serial.println(incomingFSR2);
   Serial.println("--------------------");
 }
-
 
 // Checks if motion was detected, interupt sets LED HIGH and starts a timer
 void IRAM_ATTR detectsMovement() {
@@ -217,6 +219,13 @@ void setup() {
   // esp_now_peer_info_t peerInfo;
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
   peerInfo.channel = 0;  
+  if (peerInfo.channel != WiFi.channel()) {
+      esp_wifi_set_promiscuous(true);
+      esp_wifi_set_channel(WiFi.channel(), WIFI_SECOND_CHAN_NONE);
+      esp_wifi_set_promiscuous(false);
+  }
+
+
   peerInfo.encrypt = false;
 
   // Add peer        
@@ -234,9 +243,9 @@ void setup() {
   pinMode(PIRpin, OUTPUT);
   pinMode(WIFIpin, OUTPUT);
   digitalWrite(PIRpin, LOW);
-  pinMode(ledPin, OUTPUT);
-  // initialize the pushbutton pin as an input:
-  pinMode(buttonPin, INPUT);
+  // pinMode(buttonLEDpin, OUTPUT);
+  // // initialize the pushbutton pin as an input:
+  // pinMode(buttonPin, INPUT);
 
   // PIR Motion Sensor mode INPUT_PULLUP
   pinMode(PIR, INPUT_PULLUP);
@@ -254,7 +263,8 @@ void loop() {
   getReadings();
 
   // Set values to send
-  outgoingStartCommand.startSensors = startDataCollection;
+  outgoingStartCommand.startSensors = startDataCollection;  
+;
 
   // Send message via ESP-NOW
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outgoingStartCommand, sizeof(outgoingStartCommand));
@@ -267,21 +277,20 @@ void loop() {
   }
 
   if (startTimer && (now_M - lastTrigger > (TIMESECONDS * 1000))) {
-    Serial.println("Motion stopped");
-    Serial.println("--------------------");
+    // Serial.println("Motion stopped");
+    // Serial.println("--------------------");
     
     digitalWrite(PIRpin, LOW);
     startTimer = false;
   }
 
-  updateDisplay();
-
-
   if(WiFi.status() != WL_CONNECTED){
-    Serial.print("wifi Disconnected! ");
+    Serial.println("wifi Disconnected! ");
     digitalWrite(WIFIpin, LOW);
     connectToWiFi();
-    
   }
+
+  updateDisplay();
+
   delay(1000);
 }
