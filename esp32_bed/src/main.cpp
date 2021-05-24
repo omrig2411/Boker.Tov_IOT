@@ -8,41 +8,67 @@
 #include "credentials.h"
 
 //wifi credentials
-#define WIFI_TIMEOUT_MS 10000
+#define WIFI_TIMEOUT_MS 10000 // Time to try connecting to wifi until timeout
+#define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
+#define TIME_TO_SLEEP  60        /* Duration of time ESP32 will go to sleep (in seconds) */
+// #define sensor_pin_bitmask 0x800000000// bitmask to determine rtc GPIO pins to monitor for deep sleep wakeup
 
-// REPLACE WITH THE MAC Address of your receiver 
+//deep sleep variables
+int wakeUpStart = 0;
+boolean goToSleep = 0;
+
+// esp_now MAC adress of box board
 uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x35, 0x32, 0x9C};
 
-const int WIFIpin = 25;
+const int WIFIpin = 21;
+
+RTC_DATA_ATTR int bootCount = 0; // this attribute will keep its value during a deep sleep / wake cycle
 
 //fsr variables
-const int fsrAnalogPin1 = 34; // first FSR is connected to analog 34
-const int fsrAnalogPin2 = 35; // second FSR is connected to analog 35
+const int fsrAnalogPin1 = 39; // First FSR is connected to analog 34
+const int fsrAnalogPin2 = 34; // Second FSR is connected to analog 35
+const int fsrAnalogPin3 = 35; // Third FSR is connected to analog 32
+const int fsrAnalogPin4 = 32; // Fourth FSR is connected to analog 33
+const int fsrAnalogPin5 = 33; // Fifth FSR is connected to analog 25
 int fsrReading1;              // the analog reading from the FSR resistor divider
 int fsrReading2;
+int fsrReading3;
+int fsrReading4;
+int fsrReading5;
 int LEDbrightness1;
 int LEDbrightness2;
-const int FSRLEDpin1 = 32;
-const int FSRLEDpin2 = 33;
+const int FSRLEDpin1 = 16;
+const int FSRLEDpin2 = 17;
 
 // data to to be sent to esp32 box board
 int outgoingFSR1;      // the analog reading from the FSR resistor divider
 int outgoingFSR2;
+int outgoingFSR3;
+int outgoingFSR4;
+int outgoingFSR5;
 
-// incoming data from esp32 box board
+// incoming flag variable from esp32 box - start sending FSR sensors data to esp32 box 
 boolean startDataCollection;
 
-typedef struct struct_message {
+typedef struct struct_message_out {
   int FSR1;
   int FSR2;
+  int FSR3;
+  int FSR4;
+  int FSR5;
+  boolean reSend = 0;
+} struct_message_out;
+
+typedef struct struct_message_in {
   boolean startSensors = 0;
-} struct_message;
+  boolean goToSleep;
+} struct_message_in;
 
-// Create a struct_message called incomingStartCommand to hold 
-struct_message incomingStartCommand;
+// Create a struct_message_out called incomingMessage to hold 
+struct_message_in incomingMessage;
 
-// Create a struct_message to hold outgoing sensor readings
-struct_message outgoingReadings;
+// Create a struct_message_out to hold outgoing sensor readings
+struct_message_out outGoingReadings;
 
 // Variable to store if sending data was successful
 String success; 
@@ -79,59 +105,13 @@ void connectToWiFi() {
   }
 }
 
-//callback upon sending data
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("Send Status: ");
-  // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Fail" : "Delivery Success");
-  if (status == 0) {
-    Serial.println("Delivery Success :)");
-  }else {
-    Serial.println("Delivery Fail :(");
-  }
-  Serial.println("--------------------");
-}
-
-//callback upon recieving data
-void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
-  memcpy(&incomingStartCommand, incomingData, sizeof(incomingStartCommand));
-  Serial.print("Bytes recieved: ");
-  Serial.println(len);
-  startDataCollection = incomingStartCommand.startSensors;
-}
-
-//sensor reading to be sent
-void getReadings() {
-  if (startDataCollection == 1){
-    fsrReading1 = analogRead(fsrAnalogPin1);
-    fsrReading2 = analogRead(fsrAnalogPin2);
-  } 
-}
-
-void updateDisplay() {
-  //Serial monitor display
-  Serial.print("sensors start: ");
-  Serial.println(startDataCollection);
-  Serial.println("--------------------");
-}
-
-void setup() {
-  // Serial port for debugging purposes
-  Serial.begin(115200);
-
-  connectToWiFi();
-
+void connectESPNow() {
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
     return;
   }
 
-  // Once ESPNow is successfully Init, we will register for Send CB to
-  // get the status of Trasnmitted packet
-  esp_now_register_send_cb(OnDataSent);
-
-  // Register peer
-  // esp_now_peer_info_t peerInfo;
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
   peerInfo.channel = 0; 
   if (peerInfo.channel != WiFi.channel()) {
@@ -146,6 +126,92 @@ void setup() {
     Serial.println("Failed to add peer");
     return;
   }
+}
+
+//callback upon sending data
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("Send Status: ");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Fail" : "Delivery Success");
+  Serial.println("--------------------");
+}
+
+//callback upon recieving data
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  memcpy(&incomingMessage, incomingData, sizeof(incomingMessage));
+  Serial.print("Bytes recieved: ");
+  Serial.println(len);
+  startDataCollection = incomingMessage.startSensors;
+  goToSleep = incomingMessage.goToSleep;
+}
+
+//sensor reading to be sent
+void getReadings() {
+  if (startDataCollection == 1){
+    fsrReading1 = analogRead(fsrAnalogPin1);
+    fsrReading2 = analogRead(fsrAnalogPin2);
+    fsrReading3 = analogRead(fsrAnalogPin3);
+    fsrReading4 = analogRead(fsrAnalogPin4);
+    fsrReading5 = analogRead(fsrAnalogPin5);
+  }
+  else if(startDataCollection == 0) {
+    outGoingReadings.reSend = 1;
+  }
+}
+
+void updateDisplay() {
+  //Serial monitor display
+  Serial.print("sensors start: ");
+  Serial.println(startDataCollection);
+  Serial.println("--------------------");
+}
+
+//Method to print the reason by which ESP32 has been awaken from sleep
+void print_wakeup_reason(){
+  esp_sleep_wakeup_cause_t wakeup_reason;
+
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  switch(wakeup_reason)
+  {
+    case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
+    case ESP_SLEEP_WAKEUP_EXT1 : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
+    case ESP_SLEEP_WAKEUP_TIMER : Serial.println("Wakeup caused by timer"); break;
+    case ESP_SLEEP_WAKEUP_TOUCHPAD : Serial.println("Wakeup caused by touchpad"); break;
+    case ESP_SLEEP_WAKEUP_ULP : Serial.println("Wakeup caused by ULP program"); break;
+    default : Serial.printf("Wakeup was not caused by deep sleep: %d\n",wakeup_reason); break;
+  }
+}
+
+//deep sleep starting function, determines duration of ESP32 staying awake.
+// 60000 = 1 minute, 300000 = 5 minutes, 600000 = 10 minutes, 7200000 = 2 hours
+void ESPGoToSleep() {
+  //Go to sleep if
+   if (goToSleep == 1) { 
+    Serial.println("Going to sleep now");
+    esp_deep_sleep_start();
+    Serial.println("This will never be printed");
+  }
+}
+
+void setup() {
+  // Serial port for debugging purposes
+  Serial.begin(115200);
+
+  //Increment boot number and print it every reboot
+  ++bootCount;
+  Serial.println("Boot number: " + String(bootCount));
+    
+  //Print the wakeup reason for ESP32 and touchpad too
+  print_wakeup_reason();
+
+  delay(1000);
+
+  connectToWiFi();
+  connectESPNow();
+
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_register_send_cb(OnDataSent);
 
   // Register for a callback function that will be called when data is received
   esp_now_register_recv_cb(OnDataRecv);
@@ -153,16 +219,24 @@ void setup() {
   pinMode(FSRLEDpin1, OUTPUT);
   pinMode(FSRLEDpin2, OUTPUT);
   pinMode(WIFIpin, OUTPUT);
+
+  // Configure timer as wakeup source
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  Serial.println("Setup ESP32 to sleep " + String(TIME_TO_SLEEP / 60) +
+  " Minutes intervals");
 }
 
 void loop() {
   getReadings();
 
   // Set values to send
-  outgoingReadings.FSR1 = fsrReading1;
-  outgoingReadings.FSR2 = fsrReading2;
+  outGoingReadings.FSR1 = fsrReading1;
+  outGoingReadings.FSR2 = fsrReading2;
+  outGoingReadings.FSR3 = fsrReading3;
+  outGoingReadings.FSR4 = fsrReading4;
+  outGoingReadings.FSR5 = fsrReading5;
 
-  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outgoingReadings, sizeof(outgoingReadings));
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outGoingReadings, sizeof(outGoingReadings));
 
   if(result == ESP_OK) {
     Serial.println("Sent successfully");
@@ -175,6 +249,12 @@ void loop() {
   Serial.println(fsrReading1);
   Serial.print("FSR 2 = ");
   Serial.println(fsrReading2);
+  Serial.print("FSR 3 = ");
+  Serial.println(fsrReading3);
+  Serial.print("FSR 4 = ");
+  Serial.println(fsrReading4);
+  Serial.print("FSR 5 = ");
+  Serial.println(fsrReading5);
 
   // we'll need to change the range from the analog reading (0-1023) down to the range
   // used by analogWrite (0-255) with map!
@@ -195,5 +275,7 @@ void loop() {
 
   updateDisplay();
   
+  ESPGoToSleep();
+
   delay(1000);
 }

@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "functional": "cpp",
+        "ctime": "cpp",
+        "wire.h": "c",
+        "time.h": "c",
+        "alarm_clock.h": "c",
+        "ntpclient.h": "c",
+        "*.tcc": "c",
+        "iomanip": "c"
+    }
+}
