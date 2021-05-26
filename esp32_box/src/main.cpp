@@ -25,7 +25,7 @@
 int loopCounter = 0;
 
 // esp_now MAC adress of bed board
-uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x36, 0x58, 0xAC};
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};/*{0xAC, 0x67, 0xB2, 0x36, 0x58, 0xAC}*/
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
@@ -78,8 +78,18 @@ int inWakeUpWin = 0;
 boolean alarmStarted;
 int sumFSRSensors = 0;
 
-/* flag variable to to be sent to esp32 bed
-start sampling FSR sensors data in esp32 bed
+// MQTT user wake-up preferences variables
+int wakeUpHour;
+int wakeUpMinute;
+boolean classicWakeUp;
+boolean sleepCycle;
+boolean wakeUpConfirmation;
+boolean sound;
+boolean light;
+boolean vibration;
+
+/* flag variable to to be sent to esp32 bed-
+start sampling FSR sensors in esp32 bed
 ESP32 bed go to sleep */
 boolean startDataSampling = 1;
 boolean goToSleep = 1;
@@ -116,9 +126,8 @@ WiFiClient client;
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, AIO_SERVERPORT, MQTT_USERNAME, MQTT_PASSWORD);
 
-//TEST JSON
 // Create a JSON document
-StaticJsonDocument<200> doc;
+StaticJsonDocument<256> doc;
 
 // create an LCD object (Hex address, # characters, # rows)
 // my LCD display in on Hex address 27 and is a 20x2 version
@@ -226,14 +235,14 @@ void MQTT_connect() {
     return;
   }
 
-  Serial.print("Connecting to MQTT... ");
+  Serial.println("Connecting to MQTT... ");
 
   uint8_t retries = 3;
   while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
        Serial.println(mqtt.connectErrorString(ret));
-       Serial.println("Retrying MQTT connection in 5 seconds...");
+       Serial.println("Retrying MQTT connection in 2 seconds...");
        mqtt.disconnect();
-       delay(5000);  // wait 5 seconds
+       delay(2000);  // wait 5 seconds
        retries--;
        if (retries == 0) {
          // basically die and wait for WDT to reset me
@@ -259,8 +268,8 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 //callback upon recieving data
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
-  Serial.print("Bytes recieved: ");
-  Serial.println(len);
+  // Serial.print("Bytes recieved: ");
+  // Serial.println(len);
   FSRD.FSRData1 [loopCounter]= incomingReadings.FSR1;
   FSRD.FSRData2 [loopCounter]= incomingReadings.FSR2;
   FSRD.FSRData3 [loopCounter]= incomingReadings.FSR3;
@@ -271,13 +280,7 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
 
 // Update LCD screen display
 void updateDisplay() {
-  lcd.setCursor(0, 1);
-  lcd.print("1: ");
-  lcd.print(incomingFSR1);
-  lcd.print(" 2: ");
-  lcd.println(incomingFSR2);
-
-  //Serial monitor display
+  // Serial monitor display
   Serial.println("sensor readings:");
   Serial.print("FSR 3: ");
   Serial.println(FSRD.FSRData1 [loopCounter]);
@@ -290,9 +293,16 @@ void updateDisplay() {
   Serial.print("FSR 5: ");
   Serial.println(FSRD.FSRData5 [loopCounter]);
   Serial.println("--------------------");
+
+  // LCD monitor display
+  // lcd.setCursor(0, 1);
+  // lcd.print("1: ");
+  // lcd.print(incomingFSR1);
+  // lcd.print(" 2: ");
+  // lcd.println(incomingFSR2);
 }
 
-//Method to print the reason by which ESP32 has been awaken from sleep
+// Method to print the reason by which ESP32 has been awaken from sleep
 void print_wakeup_reason(){
   esp_sleep_wakeup_cause_t wakeup_reason;
 
@@ -320,6 +330,12 @@ void IRAM_ATTR detectsMovement() {
   Serial.println(daysOfTheWeek[timeClient.getDay()]);
   Serial.println(timeClient.getFormattedTime());
   Serial.println("--------------------");
+    
+  // Motion detection led pin timer
+  if (startTimer && (now_M - lastTrigger > (TIMESECONDS * 1000))) {
+    digitalWrite(PIRpin, LOW);
+    startTimer = false;
+  }
 }
 
 // Function to set the values to be sent to ESP32 bed
@@ -346,8 +362,6 @@ void ESPGoToSleep() {
   //Go to sleep if
   if (inWakeUpWin == 0 && millis() > 60000) {
     ESPSend(1);
-    delay(1000);
-    ESPSend(1);
     Serial.println("sleeping");
     lcd.clear();
     lcd.print("sleeping");
@@ -355,17 +369,50 @@ void ESPGoToSleep() {
     esp_deep_sleep_start();
     Serial.println("This will never be printed");
   }
-  // else {
-  //   if (inWakeUpWin == 0 && millis() > 7200000) {
-  //   ESPSend(1);
-  //   Serial.println("finished alarm clock event, now sleeping");
-  //   lcd.clear();
-  //   lcd.print("sleeping");
-  //   lcd.off();
-  //   esp_deep_sleep_start();
-  //   Serial.println("This will never be printed");
-  //   }
-  // }
+}
+
+void fetchJson(byte* payload) {
+  // Deserialize the JSON document
+  DeserializationError error = deserializeJson(doc, payload);
+
+  // Test if parsing succeeds.
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+
+  // Fetch values
+   wakeUpHour = doc["wuh"];
+   wakeUpMinute = doc["wum"];
+   if(doc["cup"] == "false") {
+     classicWakeUp = 0;
+   }else classicWakeUp = 1;
+   if(doc["sc"] == "false") {
+     sleepCycle = 0;
+   }else sleepCycle = 1;
+   if(doc["wuc"] == "false") {
+     wakeUpConfirmation = 0;
+   }else wakeUpConfirmation = 1;
+   if(doc["s"] == "false") {
+     sound = 0;
+   }else sound = 1;
+   if(doc["l"] == "false") {
+     light = 0;
+   }else light = 1;
+   if(doc["v"] == "false") {
+     vibration = 0;
+   }else vibration = 1;
+
+  // Print values.
+  Serial.println(wakeUpHour);
+  Serial.println(wakeUpMinute);
+  Serial.println(classicWakeUp);
+  Serial.println(sleepCycle);
+  Serial.println(wakeUpConfirmation);
+  Serial.println(sound);
+  Serial.println(light);
+  Serial.println(vibration);
 }
 
 // Check for new MQTT feed subscription messages
@@ -375,8 +422,7 @@ void checkSubscription() {
     if (subscription == &server) {
       Serial.print(F("Got: "));
       Serial.println((char *)server.lastread);
-      // doc["wakeUpHour"] = 
-      // Serial.println(server.)
+      fetchJson(server.lastread);
     }
     if (subscription == &mobile) {
       Serial.print(F("Got: "));
@@ -388,7 +434,7 @@ void checkSubscription() {
 }
 
 // Check the sum of all current readings to determine if user is on bed or not
-void checkFSR() {
+void checkSumFSR() {
   sumFSRSensors = incomingReadings.FSR1 + incomingReadings.FSR2 + incomingReadings.FSR3 + incomingReadings.FSR4 + incomingReadings.FSR5;
 }
 
@@ -431,19 +477,13 @@ void setup() {
   alarmSetOn = 0;
   alarmStarted = false;
 
-  // Add values in the document
-  doc["wakeUpHour"] = 19;
-  doc["wakeUpMinute"] = 46;
-  doc["wakeUpConfirmation"] = true;
-  
-  // Generate the minified JSON and send it to the Serial port.
-  serializeJson(doc, Serial);
-  Serial.println();
-
   // Generate the prettified JSON and send it to the Serial port.
   serializeJsonPretty(doc, Serial);
   Serial.println();
 
+
+  //set callback to fetch MQTT messages
+  void setCallback(SubscribeCallbackUInt32Type deserializeJson);
   // Set motionSensor pin as interrupt, assign interrupt function and set RISING mode
   attachInterrupt(digitalPinToInterrupt(PIR), detectsMovement, HIGH);
 
@@ -466,12 +506,6 @@ void loop() {
   now_M = millis();
   displayCurrentTime();
   MQTT_connect();
-  
-  // Motion detection led pin timer
-  if (startTimer && (now_M - lastTrigger > (TIMESECONDS * 1000))) {
-    digitalWrite(PIRpin, LOW);
-    startTimer = false;
-  }
 
   // Wifi connection status
   if(WiFi.status() != WL_CONNECTED){
@@ -489,9 +523,6 @@ void loop() {
 
   /***************wake-up sequence of events****************/
   
-  // Set wake up time according to Json data recieved
-  setWakeUp(doc["wakeUpHour"], doc["wakeUpMinute"]);
-
   // // Check wake up window
   // inWakeUpWin = checkIfWakeUpWindow();
   // if (inWakeUpWin == 1) {

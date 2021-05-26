@@ -7,9 +7,11 @@ int checkIfWakeUpWindow();
 
 void collectvalues();
 
+int identifyMovement(int fsr1, int fsr2, int fsr3, int fsr4, int fsr5);
+
 void saveValues();
 
-void predict();
+int predictWakeTime();
 
 // void startAlarm(boolean persistentWakeUp);
 

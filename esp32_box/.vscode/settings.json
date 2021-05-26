@@ -7,6 +7,16 @@
         "alarm_clock.h": "c",
         "ntpclient.h": "c",
         "*.tcc": "c",
-        "iomanip": "c"
+        "iomanip": "c",
+        "unordered_map": "cpp",
+        "algorithm": "cpp",
+        "system_error": "cpp",
+        "tuple": "cpp",
+        "type_traits": "cpp",
+        "cmath": "cpp",
+        "random": "cpp",
+        "fstream": "cpp",
+        "array": "cpp",
+        "utility": "cpp"
     }
 }

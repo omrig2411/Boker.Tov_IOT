@@ -18,7 +18,7 @@ int wakeUpStart = 0;
 boolean goToSleep = 0;
 
 // esp_now MAC adress of box board
-uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x35, 0x32, 0x9C};
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; /*{0xAC, 0x67, 0xB2, 0x35, 0x32, 0x9C}*/
 
 const int WIFIpin = 21;
 
@@ -131,7 +131,7 @@ void connectESPNow() {
 //callback upon sending data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.print("Send Status: ");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Fail" : "Delivery Success");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
   Serial.println("--------------------");
 }
 
@@ -141,7 +141,26 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   Serial.print("Bytes recieved: ");
   Serial.println(len);
   startDataCollection = incomingMessage.startSensors;
+  Serial.print("before data recv fuction: ");
+  Serial.println(goToSleep);
   goToSleep = incomingMessage.goToSleep;
+  Serial.print("after data recv fuction: ");
+  Serial.println(goToSleep);
+}
+
+void ESPSend() {
+  // Set values to send
+  outGoingReadings.FSR1 = fsrReading1;
+  outGoingReadings.FSR2 = fsrReading2;
+  outGoingReadings.FSR3 = fsrReading3;
+  outGoingReadings.FSR4 = fsrReading4;
+  outGoingReadings.FSR5 = fsrReading5;
+  outGoingReadings.reSend = 1;
+  
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outGoingReadings, sizeof(outGoingReadings));
+  if(result != ESP_OK) {
+    Serial.println("Error sending the data");
+  }
 }
 
 //sensor reading to be sent
@@ -154,7 +173,7 @@ void getReadings() {
     fsrReading5 = analogRead(fsrAnalogPin5);
   }
   else if(startDataCollection == 0) {
-    outGoingReadings.reSend = 1;
+    ESPSend();
   }
 }
 
@@ -185,7 +204,7 @@ void print_wakeup_reason(){
 //deep sleep starting function, determines duration of ESP32 staying awake.
 // 60000 = 1 minute, 300000 = 5 minutes, 600000 = 10 minutes, 7200000 = 2 hours
 void ESPGoToSleep() {
-  //Go to sleep if
+   Serial.print("go to sleep function: ");
    if (goToSleep == 1) { 
     Serial.println("Going to sleep now");
     esp_deep_sleep_start();
@@ -229,21 +248,7 @@ void setup() {
 void loop() {
   getReadings();
 
-  // Set values to send
-  outGoingReadings.FSR1 = fsrReading1;
-  outGoingReadings.FSR2 = fsrReading2;
-  outGoingReadings.FSR3 = fsrReading3;
-  outGoingReadings.FSR4 = fsrReading4;
-  outGoingReadings.FSR5 = fsrReading5;
-
-  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outGoingReadings, sizeof(outGoingReadings));
-
-  if(result == ESP_OK) {
-    Serial.println("Sent successfully");
-  } 
-  else {
-    Serial.println("Error sending the data");
-  }
+  ESPSend();
 
   Serial.print("FSR 1 = ");
   Serial.println(fsrReading1);
