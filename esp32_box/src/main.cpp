@@ -15,11 +15,12 @@
 #include "credentials.h"
 #include "alarm_clock.h"
 
-#define TIMESECONDS 3 // Delay between PIR sensor readings
-#define WIFI_TIMEOUT_MS 10000 // Time to try connecting to wifi until timeout (in miliseconds)
-#define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  60        /* Duration of time ESP32 will go to sleep (in seconds) */
-// #define sensor_pin_bitmask 0x8000000 // bitmask to determine rtc GPIO pins to monitor for deep sleep wakeup
+#define TIMESECONDS 3             // Delay between PIR sensor readings
+#define WIFI_TIMEOUT_MS 5000      // Time to try connecting to wifi until timeout (in miliseconds)
+#define uS_TO_M_FACTOR 60000000    // Conversion factor for micro seconds to minutes
+#define ms_TO_M_FACTOR 60000      // Conversion factor for milli seconds to minutes
+#define TIME_TO_SLEEP  1         // Duration of time ESP32 will go to sleep (in seconds)
+#define TIME_AWAKE 1
 
 //loop function counter
 int loopCounter = 0;
@@ -36,7 +37,6 @@ WiFiUDP ntpUDP;
 // changed later with setTimeOffset() ). Additionaly you can specify the
 // update interval (in milliseconds, can be changed using setUpdateInterval() ).
 NTPClient timeClient(ntpUDP, "il.pool.ntp.org", 3*3600, 6000000);
-const int WIFIpin =  25;
 
 RTC_DATA_ATTR int bootCount = 0; // this attribute will keep its value during a deep sleep / wake cycle
 
@@ -46,13 +46,14 @@ const char MQTT_SERVER[] PROGMEM    = AIO_SERVER;
 const char MQTT_USERNAME[] PROGMEM  = AIO_USERNAME;
 const char MQTT_PASSWORD[] PROGMEM  = AIO_KEY;
 
-// PIR module and LED variables
-const int PIRpin =  26;      // the number of the LED pin
+// PIR module and button ports      
 const int PIR = 27;
-int ledState = LOW;             // ledState used to set the LED
+const int SNOOZEBUTTON = 18;
+const int STOPBUTTON = 5;
         
 // timer variables
 unsigned long now_M = millis();
+unsigned long deepSleepMillis;
 unsigned long lastTrigger = 0;
 boolean startTimer = false;
 
@@ -61,32 +62,28 @@ int LEDbrightness1;
 int LEDbrightness2;
 
 // incoming data from esp32 bed board
-int incomingFSR1;      
-int incomingFSR2;
-int incomingFSR3;
-int incomingFSR4;
-int incomingFSR5;
 boolean reSend = 0;
 
 // alarm clock variables
 int alarmHour;
 int alarmMin;
-int alarmSetOn;
 int prevAlarmHour;
 int prevAlarmMin;
-int inWakeUpWin = 0;
-boolean alarmStarted;
-int sumFSRSensors = 0;
 
 // MQTT user wake-up preferences variables
-int wakeUpHour;
-int wakeUpMinute;
-boolean classicWakeUp;
-boolean sleepCycle;
-boolean wakeUpConfirmation;
-boolean sound;
-boolean light;
-boolean vibration;
+int wakeUpHour = 12;
+int wakeUpMinute = 0;
+boolean regularWakeUp = 0;
+boolean snooze = 0;
+boolean sleepCycle = 0;
+boolean wakeUpConfirmation = 0;
+boolean sound = 0;
+boolean light = 0;
+boolean vibration = 0;
+boolean stopAlarmMobile = 0;
+
+// Wake up prediction value
+float DPredicted;
 
 /* flag variable to to be sent to esp32 bed-
 start sampling FSR sensors in esp32 bed
@@ -127,39 +124,32 @@ WiFiClient client;
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, AIO_SERVERPORT, MQTT_USERNAME, MQTT_PASSWORD);
 
 // Create a JSON document
-StaticJsonDocument<256> doc;
+StaticJsonDocument<300> doc;
 
 // create an LCD object (Hex address, # characters, # rows)
 // my LCD display in on Hex address 27 and is a 20x2 version
 LiquidCrystal_I2C lcd(0x27, 20, 2); 
 
-//struct to hold raw data from FSR
-typedef struct FSRData {
-  int FSRData1 [70];
-  int FSRData2 [70];
-  int FSRData3 [70];
-  int FSRData4 [70];
-  int FSRData5 [70];
-} FSRData;
-
-//instance of FSR raw data struct
-FSRData FSRD;
-
-/****************************** Feeds ***************************************/
+/****************************** MQTT feeds ***************************************/
 
 // Setup a feed called 'server' for subscribing to changes.
 const char server_FEED[] PROGMEM = AIO_USERNAME "/feeds/server";
 Adafruit_MQTT_Subscribe server = Adafruit_MQTT_Subscribe(&mqtt, server_FEED);
 
-// Setup a feed called 'mobile' for publishing changes.
+// Setup a feed called 'server2' for publishing changes.
 Adafruit_MQTT_Publish server2 = Adafruit_MQTT_Publish(&mqtt, server_FEED);
 
 // Setup a feed called 'mobile' for subscribing to changes.
 const char mobile_FEED[] PROGMEM = AIO_USERNAME "/feeds/mobile";
 Adafruit_MQTT_Subscribe mobile = Adafruit_MQTT_Subscribe(&mqtt, mobile_FEED);
 
-// Setup a feed called 'mobile' for publishing changes.
+// Setup a feed called 'mobile2' for publishing changes.
 Adafruit_MQTT_Publish mobile2 = Adafruit_MQTT_Publish(&mqtt, mobile_FEED);
+
+// Setup a feed called 'mobile' for publishing changes.
+const char SleepData_FEED[] PROGMEM = AIO_USERNAME "/feeds/SleepData";
+Adafruit_MQTT_Publish SleepData = Adafruit_MQTT_Publish(&mqtt, SleepData_FEED);
+
 
 // Wifi connection function
 void connectToWiFi() {
@@ -192,13 +182,12 @@ void connectToWiFi() {
 
   }else{
     Serial.print("Connected! IP:");
+    Serial.println(WiFi.localIP());
     lcd.clear();
     lcd.print("Connected! IP:");
     lcd.setCursor(0,1);
-    Serial.println(WiFi.localIP());
     lcd.print(WiFi.localIP());
-    digitalWrite(WIFIpin, HIGH);
-    delay(3000);
+    delay(1000);
   }
 }
 
@@ -245,7 +234,8 @@ void MQTT_connect() {
        delay(2000);  // wait 5 seconds
        retries--;
        if (retries == 0) {
-         // basically die and wait for WDT to reset me
+         // basically die and wait for WDT to reset
+         Serial.println("Connection attempt failed, please reboot");
          while (1);
        }
   }
@@ -260,9 +250,7 @@ void displayCurrentTime() {
 
 //callback upon sending data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("Send Status:");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-  Serial.println("--------------------");
+  // status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail";
 }
 
 //callback upon recieving data
@@ -270,28 +258,32 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
   // Serial.print("Bytes recieved: ");
   // Serial.println(len);
-  FSRD.FSRData1 [loopCounter]= incomingReadings.FSR1;
-  FSRD.FSRData2 [loopCounter]= incomingReadings.FSR2;
-  FSRD.FSRData3 [loopCounter]= incomingReadings.FSR3;
-  FSRD.FSRData4 [loopCounter]= incomingReadings.FSR4;
-  FSRD.FSRData5 [loopCounter]= incomingReadings.FSR5;
+  FSRData1 = incomingReadings.FSR1;
+  FSRData2 = incomingReadings.FSR2;
+  FSRData3 = incomingReadings.FSR3;
+  FSRData4 = incomingReadings.FSR4;
+  FSRData5 = incomingReadings.FSR5;
   reSend = incomingReadings.reSend;
+
+  identifyMovementFSR(incomingReadings.FSR1, incomingReadings.FSR2,
+                      incomingReadings.FSR3, incomingReadings.FSR4,
+                      incomingReadings.FSR5);
 }
 
 // Update LCD screen display
 void updateDisplay() {
   // Serial monitor display
   Serial.println("sensor readings:");
+  Serial.print("FSR 1: ");
+  Serial.println(FSRData1);
+  Serial.print("FSR 2: ");
+  Serial.println(FSRData2);
   Serial.print("FSR 3: ");
-  Serial.println(FSRD.FSRData1 [loopCounter]);
-  Serial.print("FSR 3: ");
-  Serial.println(FSRD.FSRData2 [loopCounter]);
-  Serial.print("FSR 3: ");
-  Serial.println(FSRD.FSRData3 [loopCounter]);
+  Serial.println(FSRData3);
   Serial.print("FSR 4: ");
-  Serial.println(FSRD.FSRData4 [loopCounter]);
+  Serial.println(FSRData4);
   Serial.print("FSR 5: ");
-  Serial.println(FSRD.FSRData5 [loopCounter]);
+  Serial.println(FSRData5);
   Serial.println("--------------------");
 
   // LCD monitor display
@@ -323,17 +315,17 @@ void print_wakeup_reason(){
 void IRAM_ATTR detectsMovement() {
   Serial.println("MOTION DETECTED AT:");
 
-  digitalWrite(PIRpin, HIGH);
   startTimer = true;
   lastTrigger = millis();
   
   Serial.println(daysOfTheWeek[timeClient.getDay()]);
   Serial.println(timeClient.getFormattedTime());
   Serial.println("--------------------");
-    
+
+  identifyMovementPIR();
+
   // Motion detection led pin timer
   if (startTimer && (now_M - lastTrigger > (TIMESECONDS * 1000))) {
-    digitalWrite(PIRpin, LOW);
     startTimer = false;
   }
 }
@@ -360,7 +352,8 @@ void ESPSend(int state) {
 60000 = 1 minute, 300000 = 5 minutes, 600000 = 10 minutes, 7200000 = 2 hours */
 void ESPGoToSleep() {
   //Go to sleep if
-  if (inWakeUpWin == 0 && millis() > 60000) {
+  unsigned long currentTime = millis();
+  if ((checkIfWakeUpWindow() == 0) && ((currentTime - deepSleepMillis) >= (TIME_AWAKE * ms_TO_M_FACTOR))) {
     ESPSend(1);
     Serial.println("sleeping");
     lcd.clear();
@@ -371,7 +364,7 @@ void ESPGoToSleep() {
   }
 }
 
-void fetchJson(byte* payload) {
+void fetchJsonServer(byte* payload) {
   // Deserialize the JSON document
   DeserializationError error = deserializeJson(doc, payload);
 
@@ -382,37 +375,59 @@ void fetchJson(byte* payload) {
     return;
   }
 
-  // Fetch values
-   wakeUpHour = doc["wuh"];
-   wakeUpMinute = doc["wum"];
-   if(doc["cup"] == "false") {
-     classicWakeUp = 0;
-   }else classicWakeUp = 1;
-   if(doc["sc"] == "false") {
-     sleepCycle = 0;
-   }else sleepCycle = 1;
-   if(doc["wuc"] == "false") {
-     wakeUpConfirmation = 0;
-   }else wakeUpConfirmation = 1;
-   if(doc["s"] == "false") {
-     sound = 0;
-   }else sound = 1;
-   if(doc["l"] == "false") {
-     light = 0;
-   }else light = 1;
-   if(doc["v"] == "false") {
-     vibration = 0;
-   }else vibration = 1;
+  // Fetch server feed values
+  wakeUpHour = doc["WUH"];
+  wakeUpMinute = doc["WUM"];
+  if(doc["CUP"] == "F") {
+    regularWakeUp = 0;
+  }else regularWakeUp = 1;
+  if(doc["SN"] == "F") {
+    snooze = 0;
+  }else snooze = 1;
+  if(doc["SC"] == "F") {
+    sleepCycle = 0;
+  }else sleepCycle = 1;
+  if(doc["WUC"] == "F") {
+    wakeUpConfirmation = 0;
+  }else wakeUpConfirmation = 1;
+  if(doc["S"] == "F") {
+    sound = 0;
+  }else sound = 1;
+  if(doc["L"] == "F") {
+    light = 0;
+  }else light = 1;
+  if(doc["V"] == "F") {
+    vibration = 0;
+  }else vibration = 1;
 
-  // Print values.
-  Serial.println(wakeUpHour);
+  Serial.print("Wake up set to: ");
+  Serial.print(wakeUpHour);
+  Serial.print(":");
   Serial.println(wakeUpMinute);
-  Serial.println(classicWakeUp);
-  Serial.println(sleepCycle);
-  Serial.println(wakeUpConfirmation);
-  Serial.println(sound);
-  Serial.println(light);
-  Serial.println(vibration);
+  
+
+  // Store jason data in appropriate variables
+  setWakeUp(wakeUpHour, wakeUpMinute);
+  setAlarmConfig(regularWakeUp, snooze, sleepCycle, wakeUpConfirmation, sound, light, vibration);
+}
+
+void fetchJsonMobile(byte* payload) {
+  // Deserialize the JSON document
+  DeserializationError error = deserializeJson(doc, payload);
+
+  // Test if parsing succeeds.
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+
+  //fetch mobile feed values
+  if(doc["STA"] == "F") {
+    stopAlarmMobile = 0;
+  }else stopAlarmMobile = 1;
+  
+  setStopAlarmFromMobile(stopAlarmMobile);
 }
 
 // Check for new MQTT feed subscription messages
@@ -422,24 +437,21 @@ void checkSubscription() {
     if (subscription == &server) {
       Serial.print(F("Got: "));
       Serial.println((char *)server.lastread);
-      fetchJson(server.lastread);
+      fetchJsonServer(server.lastread);
+      
     }
     if (subscription == &mobile) {
       Serial.print(F("Got: "));
       Serial.println((char *)mobile.lastread);
-      // doc["wakeUpHour"] = 
-      // Serial.println(server.)
+      fetchJsonMobile(mobile.lastread);
     }
   }
 }
 
-// Check the sum of all current readings to determine if user is on bed or not
-void checkSumFSR() {
-  sumFSRSensors = incomingReadings.FSR1 + incomingReadings.FSR2 + incomingReadings.FSR3 + incomingReadings.FSR4 + incomingReadings.FSR5;
-}
-
 void setup() {
   Serial.begin(115200);
+  startMillisSnooze = millis();
+  deepSleepMillis = millis();
 
   lcd.init();
   lcd.backlight();
@@ -456,61 +468,58 @@ void setup() {
   connectToWiFi();
   connectESPNow();
 
-  // Once ESPNow is successfully Init, we will register for Send CB to
-  // get the status of Trasnmitted packet
-  esp_now_register_send_cb(OnDataSent);
-
-  // Register for a callback function that will be called when data is received
-  esp_now_register_recv_cb(OnDataRecv);
+  // Once ESPNow is successfully Init
+  //register a callback function that will be called when data is sent
+  if (esp_now_register_send_cb(OnDataSent) != ESP_OK) {
+    Serial.println("Error registering ESPNow send callback");
+  }
+  // Register a callback function that will be called when data is received
+  if (esp_now_register_recv_cb(OnDataRecv) != ESP_OK) {
+    Serial.println("Error registering ESPNow receive callback");
+  }
 
   //begin ntpclient
   timeClient.begin();
 
   // set the digital pin as output:
-  pinMode(PIRpin, OUTPUT);
-  pinMode(WIFIpin, OUTPUT);
-  digitalWrite(PIRpin, LOW);
+  pinMode(RELAY, OUTPUT);
 
   // PIR Motion Sensor mode INPUT_PULLUP
   pinMode(PIR, INPUT_PULLUP);
 
-  alarmSetOn = 0;
-  alarmStarted = false;
+  // Stop  & Snooze buttons mode INPUT
+  pinMode(STOPBUTTON, INPUT);
+  pinMode(SNOOZEBUTTON, INPUT);
 
-  // Generate the prettified JSON and send it to the Serial port.
-  serializeJsonPretty(doc, Serial);
-  Serial.println();
-
+  buzzerSetup();
 
   //set callback to fetch MQTT messages
   void setCallback(SubscribeCallbackUInt32Type deserializeJson);
-  // Set motionSensor pin as interrupt, assign interrupt function and set RISING mode
+  // Set motionSensor pin as interrupt, assign interrupt function and set HIGH mode
   attachInterrupt(digitalPinToInterrupt(PIR), detectsMovement, HIGH);
+  // Set Snooze Button pin as interrupt, assign interrupt function and set HIGH mode
+  attachInterrupt(digitalPinToInterrupt(SNOOZEBUTTON), snoozeButtonPush, HIGH);
+  // Set stop alarm Button pin as interrupt, assign interrupt function and set HIGH mode
+  attachInterrupt(digitalPinToInterrupt(STOPBUTTON), stopAlarmButtonPush, HIGH);
 
   // Configure timer as wakeup source
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_M_FACTOR);
   Serial.println("Setup ESP32 to sleep " + String(TIME_TO_SLEEP / 60) +
   " Minutes intervals");
 
   // Setup MQTT subscription for onoff feed.
   mqtt.subscribe(&server);
   mqtt.subscribe(&mobile);
-
+  
   /* Send message to ESP32 bed to start collecting sensors data 
   one time only on ESP32 box setup() */
   ESPSend(0);
 }
 
 void loop() {
-  timeClient.update();
-  now_M = millis();
-  displayCurrentTime();
-  MQTT_connect();
-
   // Wifi connection status
   if(WiFi.status() != WL_CONNECTED){
     Serial.println("wifi Disconnected! ");
-    digitalWrite(WIFIpin, LOW);
     connectToWiFi();
   }
 
@@ -518,18 +527,38 @@ void loop() {
   if(reSend == 1) {
     ESPSend(0);
   }
-  
+
+  timeClient.update();
+  now_M = millis();
+  displayCurrentTime();
+  MQTT_connect();
   checkSubscription();
 
   /***************wake-up sequence of events****************/
+  Dpredict();
+
+  if (checkIfWakeUpWindow() == 1) {
+    triggerWakeUp(timeClient.getHours(), timeClient.getMinutes(), DPredicted);
+  }
   
-  // // Check wake up window
-  // inWakeUpWin = checkIfWakeUpWindow();
-  // if (inWakeUpWin == 1) {
-  //   if(predict() == true) { // Start prediction function if inside window of upcoming wake up
-  //     // startAlarm(doc["wakeUpConfirmation"]);
-  //   }  
+  cleanValue(loopCounter); 
+
+  // D value published to MQTT server feed
+  Serial.print("value of D is: ");
+  Serial.println(DToServer);
+  if(DToServer != 0) {
+    SleepData.publish(DToServer);
+  }
+  
+
+  // if(alarmOn == 1) {
+  //   doc["alarmStart"] = "true";
+  //   serializeJson(doc, Serial);
+  //   mobile2.publish(doc);
   // }
+  
+
+  /**************end of wake up sequence********************/
 
   updateDisplay();
   ++loopCounter;

@@ -130,9 +130,7 @@ void connectESPNow() {
 
 //callback upon sending data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("Send Status: ");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-  Serial.println("--------------------");
+  status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail";
 }
 
 //callback upon recieving data
@@ -282,5 +280,5 @@ void loop() {
   
   ESPGoToSleep();
 
-  delay(1000);
+  delay(800);
 }
