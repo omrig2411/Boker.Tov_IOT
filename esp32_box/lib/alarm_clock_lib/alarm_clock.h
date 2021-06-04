@@ -2,11 +2,22 @@
 #define ALARM_CLOCK_H_
 
 #include <Arduino.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+
+extern WiFiUDP ntpUDP;
+
+extern NTPClient timeClient;
 
 extern const int RELAY;
 extern boolean alarmOn;
 extern float DToServer;
 extern unsigned long startMillisSnooze;
+extern struct tm wakeUpWindow;
+extern boolean inWindow;
+extern int snoozeBasicFuncButton;
+extern int stopAlarmButton;
+extern boolean vibrate;
 
 extern int FSRData1;  
 extern int FSRData2;
@@ -16,13 +27,15 @@ extern int FSRData5;
 
 extern boolean alarmSetOn;
 
+void ESPSend(int state);
+
 void setWakeUp(int Hour, int Minute);  
 
-void setAlarmConfig(boolean classicWakeUp, boolean snooze, boolean sleepCycle, boolean wakeUpConfirmation, boolean sound, boolean light, boolean vibration);
+void setAlarmConfig(boolean alarmSetOn, boolean classicWakeUp, boolean snooze, boolean sleepCycle, boolean wakeUpConfirmation, boolean sound, boolean light, boolean vibration);
 
 void setStopAlarmFromMobile(boolean stopAlarmfromMobile);
 
-int checkIfWakeUpWindow();
+void checkIfWakeUpWindow();
 
 void triggerWakeUp(int currH, int currM, float predictWakeTime);
 
@@ -44,16 +57,16 @@ void snoozeButtonPush();
 
 void stopAlarmButtonPush();
 
-void startAlarm();
+void startAlarmState();
 
 void snoozeBasicFunc(); 
-
-void buzzerSetup();
 
 void buzzerAction();
 
 void lightAction();
 
-void startActuators();
+int defineActuators(boolean sound, boolean light, boolean vibrate);
+
+void startActuators(int actuMode);
 
 #endif // ALARM_CLOCK_H_

@@ -25,11 +25,11 @@ const int WIFIpin = 21;
 RTC_DATA_ATTR int bootCount = 0; // this attribute will keep its value during a deep sleep / wake cycle
 
 //fsr variables
-const int fsrAnalogPin1 = 39; // First FSR is connected to analog 34
-const int fsrAnalogPin2 = 34; // Second FSR is connected to analog 35
-const int fsrAnalogPin3 = 35; // Third FSR is connected to analog 32
-const int fsrAnalogPin4 = 32; // Fourth FSR is connected to analog 33
-const int fsrAnalogPin5 = 33; // Fifth FSR is connected to analog 25
+const int fsrAnalogPin1 = 39; // First FSR is connected to analog 39
+const int fsrAnalogPin2 = 34; // Second FSR is connected to analog 34
+const int fsrAnalogPin3 = 35; // Third FSR is connected to analog 35
+const int fsrAnalogPin4 = 32; // Fourth FSR is connected to analog 32
+const int fsrAnalogPin5 = 33; // Fifth FSR is connected to analog 33
 int fsrReading1;              // the analog reading from the FSR resistor divider
 int fsrReading2;
 int fsrReading3;
@@ -37,8 +37,7 @@ int fsrReading4;
 int fsrReading5;
 int LEDbrightness1;
 int LEDbrightness2;
-const int FSRLEDpin1 = 16;
-const int FSRLEDpin2 = 17;
+
 
 // data to to be sent to esp32 box board
 int outgoingFSR1;      // the analog reading from the FSR resistor divider
@@ -46,6 +45,10 @@ int outgoingFSR2;
 int outgoingFSR3;
 int outgoingFSR4;
 int outgoingFSR5;
+
+// Vibration variable
+const int vibrationMotorsPin = 16;
+boolean vibrate = 0;
 
 // incoming flag variable from esp32 box - start sending FSR sensors data to esp32 box 
 boolean startDataCollection;
@@ -57,11 +60,13 @@ typedef struct struct_message_out {
   int FSR4;
   int FSR5;
   boolean reSend = 0;
+  boolean reSendvib = 0;
 } struct_message_out;
 
 typedef struct struct_message_in {
   boolean startSensors = 0;
   boolean goToSleep;
+  boolean startVibrationMotors;
 } struct_message_in;
 
 // Create a struct_message_out called incomingMessage to hold 
@@ -144,6 +149,9 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   goToSleep = incomingMessage.goToSleep;
   Serial.print("after data recv fuction: ");
   Serial.println(goToSleep);
+  vibrate = incomingMessage.startVibrationMotors;
+  Serial.print("Vibration value: ");
+  Serial.println(vibrate);
 }
 
 void ESPSend() {
@@ -153,7 +161,12 @@ void ESPSend() {
   outGoingReadings.FSR3 = fsrReading3;
   outGoingReadings.FSR4 = fsrReading4;
   outGoingReadings.FSR5 = fsrReading5;
-  outGoingReadings.reSend = 1;
+  if(incomingMessage.startSensors == 0) {
+    outGoingReadings.reSend = 1;
+  } else outGoingReadings.reSend = 0;
+  if(incomingMessage.startVibrationMotors == 1) {
+    outGoingReadings.reSendvib == 1;
+  }
   
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outGoingReadings, sizeof(outGoingReadings));
   if(result != ESP_OK) {
@@ -202,8 +215,8 @@ void print_wakeup_reason(){
 //deep sleep starting function, determines duration of ESP32 staying awake.
 // 60000 = 1 minute, 300000 = 5 minutes, 600000 = 10 minutes, 7200000 = 2 hours
 void ESPGoToSleep() {
-   Serial.print("go to sleep function: ");
-   if (goToSleep == 1) { 
+    if (goToSleep == 1) { 
+    Serial.print("deep sleep function: ");
     Serial.println("Going to sleep now");
     esp_deep_sleep_start();
     Serial.println("This will never be printed");
@@ -233,9 +246,8 @@ void setup() {
   // Register for a callback function that will be called when data is received
   esp_now_register_recv_cb(OnDataRecv);
 
-  pinMode(FSRLEDpin1, OUTPUT);
-  pinMode(FSRLEDpin2, OUTPUT);
   pinMode(WIFIpin, OUTPUT);
+  pinMode(vibrationMotorsPin, OUTPUT);
 
   // Configure timer as wakeup source
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
@@ -264,16 +276,21 @@ void loop() {
   LEDbrightness1 = map(fsrReading1, 0, 1023, 0, 255);
   LEDbrightness2 = map(fsrReading2, 0, 1023, 0, 255);
 
-  // LED gets brighter the harder you press
-  analogWrite(FSRLEDpin1, LEDbrightness1);
-  analogWrite(FSRLEDpin2, LEDbrightness2);
-
   Serial.println("--------------------");
 
   if (WiFi.status() != WL_CONNECTED){
     Serial.println("wifi Disconnected! ");
     digitalWrite(WIFIpin, LOW);
     connectToWiFi();
+  }
+
+  if(vibrate == 1) {
+    int i;
+    for(i = 0; i <= 3; i++) {
+      digitalWrite(vibrationMotorsPin, HIGH);
+      delay(500);
+      digitalWrite(vibrationMotorsPin, LOW);
+    } 
   }
 
   updateDisplay();
