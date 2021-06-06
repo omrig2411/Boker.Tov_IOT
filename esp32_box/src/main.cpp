@@ -21,8 +21,6 @@
 
 #define TIMESECONDS 3               // Delay between PIR sensor readings
 #define WIFI_TIMEOUT_MS 5000        // Time to try connecting to wifi until timeout (in miliseconds)
-#define uS_TO_M_FACTOR 60000000     // Conversion factor for micro seconds to minutes
-#define ms_TO_M_FACTOR 60000        // Conversion factor for milli seconds to minutes
 #define TIME_ASLEEP  1              // Duration of time ESP32 will be asleep (in minutes)
 #define TIME_AWAKE 3                // Duration of time ESP32 will be awake (in minutes)
 
@@ -34,8 +32,8 @@ uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};/*{0xAC, 0x67,
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
-// Log TAG variable
-static char tag[] = "mainModule";
+// // Log TAG variable
+// static char tag[] = "mainModule";
 
 RTC_DATA_ATTR int bootCount = 0; // this attribute will keep its value during a deep sleep / wake cycle
 
@@ -124,10 +122,6 @@ Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, AIO_SERVERPORT, MQTT_USERNAME, M
 StaticJsonDocument<512> doc;
 StaticJsonDocument<128> ESPWakeUMessage;
 char data[80];
-
-// create an LCD object (Hex address, # characters, # rows)
-// my LCD display in on Hex address 27 and is a 20x2 version
-LiquidCrystal_I2C lcd(0x27, 20, 2); 
 
 /****************************** MQTT feeds ***************************************/
 
@@ -246,37 +240,12 @@ void MQTT_connect() {
   Serial.println("MQTT Connected!");
 }
 
+// SNTP connection function
 void startSNTP() {
   ESP_LOGD(tag, "starting SNTP");
   sntp_setoperatingmode(SNTP_OPMODE_POLL);
   sntp_setservername(0, "il.pool.ntp.org");
   sntp_init();
-}
-
-// Current time display on LCD screen function
-void displayLCDUpdate() {
-    timeClient.update();
-    lcd.clear();
-    lcd.print(timeClient.getFormattedTime());
-    
-    lcd.setCursor(0, 1);
-    
-    if((alarmSet == 1) && (alarmOn == 0)) {
-      lcd.print("alarm: ");
-      lcd.print(wakeUpHour);
-      lcd.print(":");
-      if(wakeUpMinute <= 9) {
-        lcd.print(0);
-      }
-      lcd.print(wakeUpMinute);
-    }
-    else if((alarmSet == 0) && (alarmOn == 0)) {
-      lcd.print("alarm: ");
-      lcd.print("not set");
-    }
-    else if((alarmSet == 1) && (alarmOn == 1)) {
-      lcd.print("Wake UP!!!");
-    }
 }
 
 //callback upon sending data
@@ -300,6 +269,35 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   identifyMovementFSR(incomingReadings.FSR1, incomingReadings.FSR2,
                       incomingReadings.FSR3, incomingReadings.FSR4,
                       incomingReadings.FSR5);
+}
+
+// Current time display on LCD screen function
+void updateLCDDisplay() {
+    timeClient.update();
+    lcd.clear();
+    lcd.print(timeClient.getFormattedTime());
+    
+    lcd.setCursor(0, 1);
+    
+    if((alarmSet == 1) && (alarmOn == 0)) {
+      lcd.print("alarm: ");
+      if(wakeUpHour <= 9) {
+        lcd.print(0);
+      }
+      lcd.print(wakeUpHour);
+      lcd.print(":");
+      if(wakeUpMinute <= 9) {
+        lcd.print(0);
+      }
+      lcd.print(wakeUpMinute);
+    }
+    else if((alarmSet == 0) && (alarmOn == 0)) {
+      lcd.print("alarm: ");
+      lcd.print("not set");
+    }
+    else if((alarmSet == 1) && (alarmOn == 1)) {
+      lcd.print("Wake UP!!!");
+    }
 }
 
 // Update LCD screen display
@@ -391,7 +389,7 @@ void ESPSend(int state) {
 void ESPGoToSleep() {
   //Go to sleep if
   unsigned long currentTime = millis();
-  if ((inWindow == 0) && ((currentTime - deepSleepMillis) >= (TIME_AWAKE * ms_TO_M_FACTOR))) {
+  if ((alarmOn == 0) && (inWindow == 0) && ((currentTime - deepSleepMillis) >= (TIME_AWAKE * ms_TO_M_FACTOR))) {
     ESPSend(1);
     //   // Nofity MQTT feed that ESP32 box is sleeping
     // String payload = "{\"AWAKE\":\"FALSE\"}";
@@ -515,7 +513,6 @@ void checkSubscription() {
 
 void setup() {
   Serial.begin(115200);
-  startMillisSnooze = millis();
   deepSleepMillis = millis();
   wakeUpWindow.tm_hour = 12;
   wakeUpWindow.tm_min = 0;
@@ -602,7 +599,7 @@ void loop() {
   }
 
   now_M = millis();
-  displayLCDUpdate();
+  updateLCDDisplay();
   MQTT_connect();
   checkSubscription();
   
@@ -616,7 +613,7 @@ void loop() {
   Serial.println(DToServer);
   checkIfWakeUpWindow();
 
-  if(inWindow == 1) {
+  if(inWindow == 1 || regularWakeUpSetting == 1) {
     triggerWakeUp(timeClient.getHours(), timeClient.getMinutes(), DToServer);
   }
   
@@ -629,7 +626,7 @@ void loop() {
   // D value published to MQTT server feed
   Serial.print("value of D is: ");
   Serial.println(DToServer);
-  if(DToServer != 0) {
+  if(DToServer > 0 || DToServer <= 2) {
     SleepData.publish(DToServer);
   }
 
@@ -640,5 +637,5 @@ void loop() {
   Serial.println("loop number: " + String(loopCounter));
   Serial.println("--------------------");
   ESPGoToSleep();
-  delay(1000);
+  delay(800);
 }

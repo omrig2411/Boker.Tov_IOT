@@ -8,12 +8,14 @@
 #include "main.cpp"
 #include "esp_sntp.h"
 
+#define uS_TO_M_FACTOR 60000000                 // Conversion factor for micro seconds to minutes
+#define ms_TO_M_FACTOR 60000                    // Conversion factor for milli seconds to minutes
 #define WAKE_UP_TIMEOUT 300000                  // 300000 = 5 minutes, 1800000 = 30 minutes
 #define FSR_THRESHOLD 100                       // FSR sensitivity to pressure threshold
 #define ALARM_WINDOW 30                         // The constant window for predicting wake up time in minutes
 #define EMPTY_BED_THRESHOLD 200                 // Threshold for FSr sensors on bed, if input < threshold then bed is empty
 #define snoozeBasicFuncPERIOD 5                 // Set duration for snoozeBasicFunc
-#define BUZZER 25                           // Buzzer pin
+#define BUZZER 25                               // Buzzer pin
 #define BUZZER_CHANNEL 0                        // Buzzer channel
 
 // ntp client variables
@@ -51,8 +53,6 @@ boolean firstTimeSignalOn = 1;
 int actuatorsSwitch = 0;
 boolean vibrate = 0;
 
-unsigned long startMillisSnooze;
-
 //integers to hold raw data from FSR
 int FSRData1;
 int FSRData2;
@@ -72,6 +72,10 @@ int freq = 2000;
 int channel = 0;
 int resolution = 8;
 
+// create an LCD object (Hex address, # characters, # rows)
+// my LCD display in on Hex address 27 and is a 20x2 version
+LiquidCrystal_I2C lcd(0x27, 20, 2); 
+
 /* Set the time of the wake up window (specified time is the end of the window)*/
 void setWakeUp(int Hour, int Minute) {
     // struct tm* ltm;                         // **Delete after recieving date by json
@@ -81,7 +85,7 @@ void setWakeUp(int Hour, int Minute) {
     
     wakeUpWindow.tm_year = 121/*(number - 1900)*/;       // **Change to input from json
     wakeUpWindow.tm_mon = 5/*(number - 1)*/;             // **Change to input from json
-    wakeUpWindow.tm_mday = 4;                            // **Change to input from json
+    wakeUpWindow.tm_mday = 6;                            // **Change to input from json
     wakeUpWindow.tm_hour = Hour;
     wakeUpWindow.tm_min = Minute;
     return;
@@ -143,10 +147,10 @@ void checkIfWakeUpWindow() {
     Serial.print(" Minute: ");
     Serial.println(wakeUpWindow.tm_min);
 
-    Serial.print("timeRemaining: ");
+    Serial.print("timeRemaining in minutes: ");
     Serial.println(timeRemaining / 60);
     
-    if ((timeRemaining > 0 && ((timeRemaining / 60) < 30)) || alarmOn) {
+    if ((timeRemaining > 0 && ((timeRemaining / 60) <= 30)) || alarmOn) {
         inWindow = 1;
     }
     else inWindow = 0;
@@ -163,9 +167,16 @@ void triggerWakeUp(int currH, int currM, float Dpredict) {
         Serial.println("@@@@@triggerWakeUp(), 1.0");
         if(regularWakeUpSetting == 1 && alarmOn == 0) {
             Serial.println("@@@@@triggerWakeUp(), 1.1");
+            Serial.print("first time signal:");
+            Serial.println(firstTimeSignalOn);
+            Serial.print("Hour condition:");
+            Serial.println((currH == wakeUpWindow.tm_hour));
+            Serial.print("Minute condition:");
+            Serial.println((currM == wakeUpWindow.tm_min));
             if((currH == wakeUpWindow.tm_hour) && (currM == wakeUpWindow.tm_min) && firstTimeSignalOn) {
                 Serial.println("@@@@@triggerWakeUp(), 1.1.1");
                 alarmOn = 1;
+                return;
             }
         }   
         else if(regularWakeUpSetting == 0 && alarmOn == 0) {
@@ -175,12 +186,13 @@ void triggerWakeUp(int currH, int currM, float Dpredict) {
                 if((currH == wakeUpWindow.tm_hour) && (currM == wakeUpWindow.tm_min) && firstTimeSignalOn){
                     Serial.println("@@@@@triggerWakeUp(), 1.2.1.1");
                     alarmOn = 1; 
+                    return;
                 } /* Stages 3-5 of sleep cycle, don't wake up unless the wake up time is due*/
-                return;
             }
             else if(Dpredict >= 1) {
                 Serial.println("@@@@@triggerWakeUp(), 1.2.2");
                 alarmOn = 1; /* stages 1-2 of sleep cycle, do wake up*/
+                return;
             }       
         }
         else if(alarmOn == 1) {
@@ -189,7 +201,7 @@ void triggerWakeUp(int currH, int currM, float Dpredict) {
     }
     return;
 }
-/*finish writing*/
+
 void identifyMovementPIR() {
     value++;
 }
@@ -237,7 +249,7 @@ void saveValues() {
 }
 
 float Dpredict() {
-    float P = 0.10; // P constant
+    float P = 0.12; // P constant
     
     saveValues();
     
@@ -315,16 +327,27 @@ void startAlarmState() {
 }
 
 void snoozeBasicFunc() {
+    unsigned long currentTime = millis();
     alarmOn = 0;
     snoozeBasicFuncOn = 1;
     Serial.println("*****snoozeBasicFunc(), 0");
-    unsigned long currentTime = millis();
-    if(currentTime - startMillisSnooze >= (snoozeBasicFuncPERIOD * 1000)) {
+    
+    while(currentTime <= (snoozeBasicFuncPERIOD * ms_TO_M_FACTOR)) {
         Serial.println("*****snoozeBasicFunc(), 1.0");
-        alarmOn = 1;
-        snoozeBasicFuncOn = 0;
-        startMillisSnooze = currentTime;
+        timeClient.update();
+        lcd.clear();
+        lcd.print(timeClient.getFormattedTime());
+        lcd.setCursor(0, 1);
+        lcd.print("Snooze: ");
+        lcd.print(snoozeBasicFuncPERIOD);
+        lcd.print(" min.");
+
+        
+        currentTime = millis();
+        delay(1000);
     }
+    alarmOn = 1;
+    snoozeBasicFuncOn = 0;
 }
 
 void IRAM_ATTR snoozeButtonPush() {

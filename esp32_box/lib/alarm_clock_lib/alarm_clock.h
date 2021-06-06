@@ -4,6 +4,10 @@
 #include <Arduino.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include "LiquidCrystal_I2C.h"
+
+#define uS_TO_M_FACTOR 60000000                 // Conversion factor for micro seconds to minutes
+#define ms_TO_M_FACTOR 60000                    // Conversion factor for milli seconds to minutes
 
 extern WiFiUDP ntpUDP;
 
@@ -12,6 +16,7 @@ extern NTPClient timeClient;
 extern const int RELAY;
 extern boolean alarmOn;
 extern float DToServer;
+extern boolean regularWakeUpSetting;
 extern unsigned long startMillisSnooze;
 extern struct tm wakeUpWindow;
 extern boolean inWindow;
@@ -26,6 +31,10 @@ extern int FSRData4;
 extern int FSRData5;
 
 extern boolean alarmSetOn;
+
+// create an LCD object (Hex address, # characters, # rows)
+// my LCD display in on Hex address 27 and is a 20x2 version
+extern LiquidCrystal_I2C lcd; 
 
 void ESPSend(int state);
 
