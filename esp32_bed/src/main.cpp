@@ -8,10 +8,11 @@
 #include "credentials.h"
 
 //wifi credentials
-#define WIFI_TIMEOUT_MS 10000 // Time to try connecting to wifi until timeout
-#define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  60        /* Duration of time ESP32 will go to sleep (in seconds) */
-// #define sensor_pin_bitmask 0x800000000// bitmask to determine rtc GPIO pins to monitor for deep sleep wakeup
+#define WIFI_TIMEOUT_MS 5000            // Time to try connecting to wifi until timeout
+#define uS_TO_S_FACTOR 1000000          // Conversion factor for micro seconds to seconds 
+#define uS_TO_M_FACTOR 60000000         // Conversion factor for micro seconds to minutes
+#define ms_TO_M_FACTOR 60000            // Conversion factor for milli seconds to minutes
+#define TIME_TO_SLEEP  1                // Duration of time ESP32 will go to sleep (in seconds) 
 
 //deep sleep variables
 int wakeUpStart = 0;
@@ -165,7 +166,7 @@ void ESPSend() {
     outGoingReadings.reSend = 1;
   } else outGoingReadings.reSend = 0;
   if(incomingMessage.startVibrationMotors == 1) {
-    outGoingReadings.reSendvib == 1;
+    outGoingReadings.reSendvib = 1;
   }
   
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outGoingReadings, sizeof(outGoingReadings));
@@ -250,8 +251,8 @@ void setup() {
   pinMode(vibrationMotorsPin, OUTPUT);
 
   // Configure timer as wakeup source
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-  Serial.println("Setup ESP32 to sleep " + String(TIME_TO_SLEEP / 60) +
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_M_FACTOR);
+  Serial.println("Setup ESP32 to sleep " + String(TIME_TO_SLEEP) +
   " Minutes intervals");
 }
 

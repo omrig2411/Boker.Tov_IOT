@@ -15,9 +15,10 @@ extern NTPClient timeClient;
 
 extern const int RELAY;
 extern boolean alarmOn;
+extern boolean firstTimeSignalOn;
 extern float DToServer;
 extern boolean regularWakeUpSetting;
-extern unsigned long startMillisSnooze;
+extern unsigned long deepSleepMillis;
 extern struct tm wakeUpWindow;
 extern boolean inWindow;
 extern int snoozeBasicFuncButton;
@@ -38,7 +39,7 @@ extern LiquidCrystal_I2C lcd;
 
 void ESPSend(int state);
 
-void setWakeUp(int Hour, int Minute);  
+void setWakeUp(int Hour, int Minute, int Day);  
 
 void setAlarmConfig(boolean alarmSetOn, boolean classicWakeUp, boolean snooze, boolean sleepCycle, boolean wakeUpConfirmation, boolean sound, boolean light, boolean vibration);
 

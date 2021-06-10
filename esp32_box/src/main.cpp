@@ -22,7 +22,7 @@
 #define TIMESECONDS 3               // Delay between PIR sensor readings
 #define WIFI_TIMEOUT_MS 5000        // Time to try connecting to wifi until timeout (in miliseconds)
 #define TIME_ASLEEP  1              // Duration of time ESP32 will be asleep (in minutes)
-#define TIME_AWAKE 3                // Duration of time ESP32 will be awake (in minutes)
+#define TIME_AWAKE 5                // Duration of time ESP32 will be awake (in minutes)
 
 //loop function counter
 int loopCounter = 0;
@@ -50,7 +50,6 @@ const int STOPBUTTON = 5;
         
 // timer variables
 unsigned long now_M = millis();
-unsigned long deepSleepMillis;
 unsigned long lastTrigger = 0;
 boolean startTimer = false;
 
@@ -65,6 +64,7 @@ boolean reSendvib = 0;
 // MQTT user wake-up preferences variables
 int wakeUpHour = 12;
 int wakeUpMinute = 0;
+int wakeUpDay = 0;
 boolean alarmSet = 0;
 boolean regularWakeUp = 0;
 boolean snooze = 0;
@@ -119,8 +119,8 @@ WiFiClient client;
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, AIO_SERVERPORT, MQTT_USERNAME, MQTT_PASSWORD);
 
 // Create a JSON document
-StaticJsonDocument<512> doc;
-StaticJsonDocument<128> ESPWakeUMessage;
+DynamicJsonDocument doc (512);
+DynamicJsonDocument ESPWakeUMessage (128);
 char data[80];
 
 /****************************** MQTT feeds ***************************************/
@@ -139,9 +139,17 @@ Adafruit_MQTT_Subscribe mobile = Adafruit_MQTT_Subscribe(&mqtt, mobile_FEED);
 // Setup a publishing variable called 'mobile2' to the 'mobile' feed for publishing changes.
 Adafruit_MQTT_Publish mobile2 = Adafruit_MQTT_Publish(&mqtt, mobile_FEED);
 
-// Setup a publishing variable called 'sleepData' to the 'sleepData' feed for publishing changes.
-const char SleepData_FEED[] PROGMEM = AIO_USERNAME "/feeds/SleepData";
-Adafruit_MQTT_Publish SleepData = Adafruit_MQTT_Publish(&mqtt, SleepData_FEED);
+// // Setup a publishing variable called 'sleepData' to the 'sleepData' feed for publishing changes.
+// const char SleepData_FEED[] PROGMEM = AIO_USERNAME "/feeds/SleepData";
+// Adafruit_MQTT_Publish SleepData = Adafruit_MQTT_Publish(&mqtt, SleepData_FEED);
+
+// Setup a publishing variable called 'lightSleepData' to the 'lightSleepData' feed for publishing changes.
+const char lightSleepData_FEED[] PROGMEM = AIO_USERNAME "/feeds/lightSleepData";
+Adafruit_MQTT_Publish lightSleepData = Adafruit_MQTT_Publish(&mqtt, lightSleepData_FEED);
+
+// Setup a publishing variable called 'deepSleepData' to the 'deepSleepData' feed for publishing changes.
+const char deepSleepData_FEED[] PROGMEM = AIO_USERNAME "/feeds/deepSleepData";
+Adafruit_MQTT_Publish deepSleepData = Adafruit_MQTT_Publish(&mqtt, deepSleepData_FEED);
 
 // Setup a publishing variable called 'ESP32OnOff' to the 'ESP32OnOff' feed for publishing changes.
 const char ESP32OnOff_FEED[] PROGMEM = AIO_USERNAME "/feeds/ESP32OnOff";
@@ -242,9 +250,10 @@ void MQTT_connect() {
 
 // SNTP connection function
 void startSNTP() {
+  char *URLToSntp = (char*) "il.pool.ntp.org";
   ESP_LOGD(tag, "starting SNTP");
   sntp_setoperatingmode(SNTP_OPMODE_POLL);
-  sntp_setservername(0, "il.pool.ntp.org");
+  sntp_setservername(0, URLToSntp);
   sntp_init();
 }
 
@@ -436,30 +445,31 @@ void fetchJsonServer(byte* payload) {
   }
 
   // Fetch server feed values
-  if(doc["A"] == "F") {
+  if(doc["A"] == "F") {                 // Active alarm - True/False 
     alarmSet = 0;
   }else alarmSet = 1;
-  wakeUpHour = doc["WUH"];
-  wakeUpMinute = doc["WUM"];
-  if(doc["CUP"] == "F") {
+  wakeUpHour = doc["H"];                // Wake up hour - int between 0 and 23 
+  wakeUpMinute = doc["M"];              // Wake up minute - int between 0 and 59
+  wakeUpDay = doc["D"];                 // Wake up Day - int between 0 and 6
+  if(doc["C"] == "F") {                 // Classic wake up capabillity - True/False (if false then smart wake up active)
     regularWakeUp = 0;
   }else regularWakeUp = 1;
-  if(doc["SN"] == "F") {
+  if(doc["S"] == "F") {                 // Snooze capabillity - True/False
     snooze = 0;
   }else snooze = 1;
-  if(doc["SC"] == "F") {
+  if(doc["SC"] == "F") {                // Sleep cycles capabillity - True/False
     sleepCycle = 0;
   }else sleepCycle = 1;
-  if(doc["WUC"] == "F") {
+  if(doc["W"] == "F") {                 // Wake up confimation capabillity - True/False
     wakeUpConfirmation = 0;
   }else wakeUpConfirmation = 1;
-  if(doc["S"] == "F") {
+  if(doc["S"] == "F") {                 // sound actuator active - True/False
     sound = 0;
   }else sound = 1;
-  if(doc["L"] == "F") {
+  if(doc["L"] == "F") {                 // Light actuator active - True/False
     light = 0;
   }else light = 1;
-  if(doc["V"] == "F") {
+  if(doc["V"] == "F") {                 // vibration actuator active - True/False
     vibration = 0;
   }else vibration = 1;
 
@@ -470,7 +480,7 @@ void fetchJsonServer(byte* payload) {
   
 
   // Store jason data in appropriate variables
-  setWakeUp(wakeUpHour, wakeUpMinute);
+  setWakeUp(wakeUpHour, wakeUpMinute, wakeUpDay);
   setAlarmConfig(alarmSet, regularWakeUp, snooze, sleepCycle, wakeUpConfirmation, sound, light, vibration);
 }
 
@@ -563,13 +573,13 @@ void setup() {
   // Set motionSensor pin as interrupt, assign interrupt function and set HIGH mode
   attachInterrupt(digitalPinToInterrupt(PIR), detectsMovement, HIGH);
   // Set Snooze Button pin as interrupt, assign interrupt function and set HIGH mode
-  attachInterrupt(SNOOZEBUTTON, snoozeButtonPush, FALLING);
+  attachInterrupt(SNOOZEBUTTON, snoozeButtonPush, HIGH);
   // Set stop alarm Button pin as interrupt, assign interrupt function and set HIGH mode
-  attachInterrupt(STOPBUTTON, stopAlarmButtonPush, FALLING);
+  attachInterrupt(STOPBUTTON, stopAlarmButtonPush, HIGH);
 
   // Configure timer as wakeup source
   esp_sleep_enable_timer_wakeup(TIME_ASLEEP * uS_TO_M_FACTOR);
-  Serial.println("Setup ESP32 to sleep " + String(TIME_ASLEEP / 60) +
+  Serial.println("Setup ESP32 to sleep " + String(TIME_ASLEEP) +
   " Minutes intervals");
 
   // Setup MQTT subscription for onoff feed.
@@ -610,10 +620,11 @@ void loop() {
   
   /***************wake-up sequence of events****************/
   Dpredict();
+  Serial.print("DToServer: ");
   Serial.println(DToServer);
   checkIfWakeUpWindow();
 
-  if(inWindow == 1 || regularWakeUpSetting == 1) {
+  if((inWindow == 1 || regularWakeUpSetting == 1) && alarmOn == 0) {
     triggerWakeUp(timeClient.getHours(), timeClient.getMinutes(), DToServer);
   }
   
@@ -626,10 +637,12 @@ void loop() {
   // D value published to MQTT server feed
   Serial.print("value of D is: ");
   Serial.println(DToServer);
-  if(DToServer > 0 || DToServer <= 2) {
-    SleepData.publish(DToServer);
+  if(DToServer > 0 && DToServer < 1) {
+    deepSleepData.publish(DToServer);
   }
-
+  else if(DToServer >= 1 && DToServer <= 1.5) {
+    lightSleepData.publish(DToServer);
+  }
   /**************end of wake up sequence********************/
 
   updateSerialDisplay();

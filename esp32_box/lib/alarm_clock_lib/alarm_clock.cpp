@@ -11,12 +11,14 @@
 #define uS_TO_M_FACTOR 60000000                 // Conversion factor for micro seconds to minutes
 #define ms_TO_M_FACTOR 60000                    // Conversion factor for milli seconds to minutes
 #define WAKE_UP_TIMEOUT 300000                  // 300000 = 5 minutes, 1800000 = 30 minutes
-#define FSR_THRESHOLD 100                       // FSR sensitivity to pressure threshold
+#define FSR_THRESHOLD 200                       // FSR sensitivity to pressure threshold
 #define ALARM_WINDOW 30                         // The constant window for predicting wake up time in minutes
 #define EMPTY_BED_THRESHOLD 200                 // Threshold for FSr sensors on bed, if input < threshold then bed is empty
-#define snoozeBasicFuncPERIOD 5                 // Set duration for snoozeBasicFunc
+#define snoozeBasicFuncPERIOD 1                 // Set duration for snoozeBasicFunc
 #define BUZZER 25                               // Buzzer pin
 #define BUZZER_CHANNEL 0                        // Buzzer channel
+#define YEAR_GAP_CONSTANT 1900                  // The year constant to subtract to calculate epoch
+#define MONTH_GAP_CONSTANT 1                     // The month constant to subtract to calculate epoch
 
 // ntp client variables
 WiFiUDP ntpUDP;
@@ -28,9 +30,11 @@ NTPClient timeClient(ntpUDP, "il.pool.ntp.org", 3*3600, 60000);
 const int RELAY =  26;
 
 time_t now;
-double epochTimeSec;
+time_t epochTimeSec;
 struct tm wakeUpWindow;
+struct tm currentTime;
 double timeRemaining;
+unsigned long deepSleepMillis;
 boolean regularWakeUpSetting;
 boolean snoozeBasicFuncSetting;
 boolean sleepCycleSetting;
@@ -77,15 +81,72 @@ int resolution = 8;
 LiquidCrystal_I2C lcd(0x27, 20, 2); 
 
 /* Set the time of the wake up window (specified time is the end of the window)*/
-void setWakeUp(int Hour, int Minute) {
-    // struct tm* ltm;                         // **Delete after recieving date by json
-    // time(&now);                             // **Delete after recieving date by json
-    // ltm = localtime(&now);                  // **Delete after recieving date by json
+void setWakeUp(int Hour, int Minute, int Day) {
+    epochTimeSec = timeClient.getEpochTime();
+    memcpy(&currentTime, localtime(&epochTimeSec), sizeof(struct tm));
 
+    /* calculate date of upcoming alarm */
+    int wYear = 1900;
+    int wMonth = 0;
+    int wDayMon = 1;
+    int currDay = (timeClient.getDay());
+    int dayDiff = 0;
+    Serial.print("Today is: ");
+    Serial.println(currDay);
     
-    wakeUpWindow.tm_year = 121/*(number - 1900)*/;       // **Change to input from json
-    wakeUpWindow.tm_mon = 5/*(number - 1)*/;             // **Change to input from json
-    wakeUpWindow.tm_mday = 6;                            // **Change to input from json
+    if(Day >= currDay) {
+        dayDiff = Day - currDay;
+    }
+    else {
+        dayDiff = 7 - (abs(Day - currDay));
+    }
+    Serial.print("Difference in days from now to wakeup time: ");
+    Serial.println(dayDiff);
+
+    // wDayMon = currentTime.tm_mday + dayDiff;
+    // wMonth = currentTime.tm_mon + MONTH_GAP_CONSTANT;
+    // wYear = currentTime.tm_year + YEAR_GAP_CONSTANT;
+    // Serial.print("wake up time day of month: ");
+    // Serial.println(wDayMon);
+    // Serial.print("wake up time month: ");
+    // Serial.println(wMonth);
+    // Serial.print("wake up time year: ");
+    // Serial.println(wYear);
+    
+    if(wDayMon > 28) {
+        Serial.println("[][][][][]setWakeUp(), 1.0");
+        if(currentTime.tm_mon == 1) {
+            Serial.println("[][][][][]setWakeUp(), 1.1");
+            wMonth = currentTime.tm_mon + 1;
+            wDayMon = (currentTime.tm_mday + dayDiff) % 28;
+        }
+        else if((wDayMon > 30) && (currentTime.tm_mon == 3 || currentTime.tm_mon == 5 || currentTime.tm_mon == 8 || currentTime.tm_mon == 10)) {
+            Serial.println("[][][][][]setWakeUp(), 1.2");
+            wMonth = currentTime.tm_mon + 1;
+            wDayMon = (currentTime.tm_mday + dayDiff) % 30;
+        }
+        else if((wDayMon > 31) && (currentTime.tm_mon == 0 || currentTime.tm_mon == 2 || currentTime.tm_mon == 4 || currentTime.tm_mon == 6 || currentTime.tm_mon == 7 || currentTime.tm_mon == 9)) {
+            Serial.println("[][][][][]setWakeUp(), 1.3");
+            wMonth = currentTime.tm_mon + 1;
+            wDayMon = (currentTime.tm_mday + dayDiff) % 31;
+        }
+        else if((wDayMon > 31) && (currentTime.tm_mon == 11)) {
+            Serial.println("[][][][][]setWakeUp(), 1.4");
+            wYear = currentTime.tm_year + 1;
+            wMonth = currentTime.tm_mon + 1;
+            wDayMon = (currentTime.tm_mday + dayDiff) % 31;
+        }
+    }
+    else {
+        Serial.println("[][][][][]setWakeUp(), 2.0");
+        wYear = currentTime.tm_year;
+        wMonth = currentTime.tm_mon;
+        wDayMon = currentTime.tm_mday + dayDiff;
+    }
+    
+    wakeUpWindow.tm_year = wYear;           // **Change to input from json (number - 1900)
+    wakeUpWindow.tm_mon = wMonth;           // **Change to input from json (number - 1)
+    wakeUpWindow.tm_mday = wDayMon;         // **Change to input from json
     wakeUpWindow.tm_hour = Hour;
     wakeUpWindow.tm_min = Minute;
     return;
@@ -111,40 +172,49 @@ void setStopAlarmFromMobile(boolean stopAlarmfromMobile) {
 
 /* Checks if we are currently in the wake up window.
     if we are currently in a wake up window function retrns 1*/
-void checkIfWakeUpWindow() {
-    struct tm currentTime;
-    Serial.println("currentTime");
-    time_t epochTimeSec = timeClient.getEpochTime();
-    Serial.println("epochTimeSec");
+void checkIfWakeUpWindow() {   
+    epochTimeSec = timeClient.getEpochTime();
     memcpy(&currentTime, localtime(&epochTimeSec), sizeof(struct tm));
-    Serial.println("memcpy");
     timeRemaining = difftime(mktime(&wakeUpWindow), epochTimeSec);
-    Serial.println("time remaining");
+
+    // Serial.println("time remaining in seconds:");
+    // Serial.print("now seconds- ");
+    // Serial.println(epochTimeSec);
+    // Serial.print("wake up seconds- ");
+    // Serial.println(mktime(&wakeUpWindow));
     
-    Serial.print("now seconds: ");
-    Serial.println(epochTimeSec);
-    Serial.print("wake up seconds: ");
-    Serial.println(mktime(&wakeUpWindow));
-    Serial.print("-----currentTime - Year: ");
-    Serial.print(currentTime.tm_year);
-    Serial.print(" Month: ");
-    Serial.print(currentTime.tm_mon);
-    Serial.print(" Day: ");
+    Serial.print("-----currentTime: ");
     Serial.print(currentTime.tm_mday);
-    Serial.print(" Hour: ");
+    Serial.print("/");
+    Serial.print(currentTime.tm_mon + MONTH_GAP_CONSTANT);
+    Serial.print("/");
+    Serial.print(currentTime.tm_year + YEAR_GAP_CONSTANT);
+    Serial.print(", ");
+    if(currentTime.tm_hour <= 9) {
+        Serial.print(0);
+    }
     Serial.print(currentTime.tm_hour);
-    Serial.print(" Minute: ");
+    Serial.print(":");
+    if(currentTime.tm_min <= 9) {
+        Serial.print(0);
+    }
     Serial.println(currentTime.tm_min);
 
-    Serial.print("-----wakeUpWindow - Year: ");
-    Serial.print(wakeUpWindow.tm_year);
-    Serial.print(" Month: ");
-    Serial.print(wakeUpWindow.tm_mon);
-    Serial.print(" Day: ");
+    Serial.print("-----wakeUpWindow: ");
     Serial.print(wakeUpWindow.tm_mday);
-    Serial.print(" Hour: ");
+    Serial.print("/");
+    Serial.print((wakeUpWindow.tm_mon + MONTH_GAP_CONSTANT));
+    Serial.print("/");
+    Serial.print((wakeUpWindow.tm_year + YEAR_GAP_CONSTANT));
+    Serial.print(", ");
+    if(wakeUpWindow.tm_hour <= 9) {
+        Serial.print(0);
+    }
     Serial.print(wakeUpWindow.tm_hour);
-    Serial.print(" Minute: ");
+    Serial.print(":");
+    if(wakeUpWindow.tm_min <= 9) {
+        Serial.print(0);
+    }
     Serial.println(wakeUpWindow.tm_min);
 
     Serial.print("timeRemaining in minutes: ");
@@ -165,37 +235,47 @@ void triggerWakeUp(int currH, int currM, float Dpredict) {
     Serial.println("@@@@@triggerWakeUp(), 0");
     if(alarmSetOnSetting) {
         Serial.println("@@@@@triggerWakeUp(), 1.0");
-        if(regularWakeUpSetting == 1 && alarmOn == 0) {
-            Serial.println("@@@@@triggerWakeUp(), 1.1");
-            Serial.print("first time signal:");
-            Serial.println(firstTimeSignalOn);
-            Serial.print("Hour condition:");
-            Serial.println((currH == wakeUpWindow.tm_hour));
-            Serial.print("Minute condition:");
-            Serial.println((currM == wakeUpWindow.tm_min));
-            if((currH == wakeUpWindow.tm_hour) && (currM == wakeUpWindow.tm_min) && firstTimeSignalOn) {
-                Serial.println("@@@@@triggerWakeUp(), 1.1.1");
-                alarmOn = 1;
+        if(stopAlarmButton == 1) {
+                Serial.println("@@@@@triggerWakeUp(), 1.1");
                 return;
-            }
-        }   
-        else if(regularWakeUpSetting == 0 && alarmOn == 0) {
+        }
+        if(regularWakeUpSetting == 1 && alarmOn == 0 && firstTimeSignalOn == 1) {
             Serial.println("@@@@@triggerWakeUp(), 1.2");
-            if(Dpredict < 1) {
+            // Serial.print("first time signal:");
+            // Serial.println(firstTimeSignalOn);
+            // Serial.print("Hour condition:");
+            // Serial.println((currH == wakeUpWindow.tm_hour));
+            // Serial.print("Minute condition:");
+            // Serial.println((currM == wakeUpWindow.tm_min));
+            if((currH == wakeUpWindow.tm_hour) && (currM == wakeUpWindow.tm_min)) {
                 Serial.println("@@@@@triggerWakeUp(), 1.2.1");
-                if((currH == wakeUpWindow.tm_hour) && (currM == wakeUpWindow.tm_min) && firstTimeSignalOn){
-                    Serial.println("@@@@@triggerWakeUp(), 1.2.1.1");
-                    alarmOn = 1; 
-                    return;
-                } /* Stages 3-5 of sleep cycle, don't wake up unless the wake up time is due*/
-            }
-            else if(Dpredict >= 1) {
-                Serial.println("@@@@@triggerWakeUp(), 1.2.2");
-                alarmOn = 1; /* stages 1-2 of sleep cycle, do wake up*/
+                alarmOn = 1;
+                deepSleepMillis = millis();
                 return;
-            }       
+            }
+            return;
+        }   
+        else if(regularWakeUpSetting == 0 && alarmOn == 0 && stopAlarmButton == 0 && firstTimeSignalOn == 1) {
+            Serial.println("@@@@@triggerWakeUp(), 1.3");
+            if(Dpredict < 1) {/* Stages 3-5 of sleep cycle, don't wake up unless the wake up time is due*/
+                Serial.println("@@@@@triggerWakeUp(), 1.3.1");
+                if((currH == wakeUpWindow.tm_hour) && (currM == wakeUpWindow.tm_min) && firstTimeSignalOn == 1){
+                    Serial.println("@@@@@triggerWakeUp(), 1.3.1.1");
+                    alarmOn = 1; 
+                    deepSleepMillis = millis();
+                    return;
+                }
+            }
+            else if(Dpredict >= 1) {/* stages 1-2 of sleep cycle, do wake up*/
+                Serial.println("@@@@@triggerWakeUp(), 1.3.2");
+                alarmOn = 1; 
+                deepSleepMillis = millis();
+                return;
+            }
+            return;    
         }
         else if(alarmOn == 1) {
+            Serial.println("@@@@@triggerWakeUp(), 1.4");
             return;
         }
     }
@@ -249,7 +329,7 @@ void saveValues() {
 }
 
 float Dpredict() {
-    float P = 0.12; // P constant
+    float P = 0.2; // P constant
     
     saveValues();
     
@@ -268,6 +348,7 @@ float Dpredict() {
 int checkSumFSR(int F1, int F2, int F3, int F4, int F5) {
     sumFSRSensors = F1 + F2 + F3 + F4 + F5;
     if(sumFSRSensors >= EMPTY_BED_THRESHOLD) {
+        Serial.println("/////bed NOT empty");
         return 1;
     }
     else {
@@ -283,12 +364,13 @@ void startAlarmState() {
 
     if (wakeUpConfirmationSetting == 1) {
         Serial.println("$$$$$startAlarmState(), 1.0");
-        if((checkSumFSR(FSRData1, FSRData2, FSRData3, FSRData4, FSRData5) < EMPTY_BED_THRESHOLD) && stopAlarmButton == 1) {
+        Serial.print("Stop button: ");
+        Serial.println(stopAlarmButton);
+        if(!(checkSumFSR(FSRData1, FSRData2, FSRData3, FSRData4, FSRData5)) && stopAlarmButton == 1) {
             Serial.println("$$$$$startAlarmState(), 1.1");
             alarmOn = 0;
             inWindow = 0;
             firstTimeSignalOn = 1;
-            stopAlarmButton = 0;
             vibrate = 0;
             ESPSend(2);
             return;
@@ -296,15 +378,19 @@ void startAlarmState() {
         else if(snoozeBasicFuncSetting == 1 && snoozeBasicFuncButton == 1){
             Serial.println("$$$$$startAlarmState(), 1.2");
             snoozeBasicFunc();   
-            snoozeBasicFuncButton = 0;                     
+            snoozeBasicFuncButton = 0;
+            return;                     
         }
         else if(alarmOn == 1) {
             Serial.println("$$$$$startAlarmState(), 1.3");
-            startActuators(actuatorsSwitch);        
+            startActuators(actuatorsSwitch);
+            return;        
         }
     }
     else if(wakeUpConfirmationSetting == 0) {
         Serial.println("$$$$$startAlarmState(), 2.0");
+        Serial.print("Stop button: ");
+        Serial.println(stopAlarmButton);
         if(stopAlarmButton == 1) {
             Serial.println("$$$$$startAlarmState(), 2.1");
             alarmOn = 0;
@@ -318,12 +404,16 @@ void startAlarmState() {
         else if(snoozeBasicFuncSetting == 1 && snoozeBasicFuncButton == 1) {
             Serial.println("$$$$$startAlarmState(), 2.2");
             snoozeBasicFunc();
+            return;
         }
         else if(alarmOn == 1) {
             Serial.println("$$$$$startAlarmState(), 2.3");
-            startActuators(actuatorsSwitch);        
+            startActuators(actuatorsSwitch);
+            return;        
         }
+        return;
     }
+    return;
 }
 
 void snoozeBasicFunc() {
@@ -352,7 +442,7 @@ void snoozeBasicFunc() {
 
 void IRAM_ATTR snoozeButtonPush() {
     Serial.println("*****snooze Button press");
-    snoozeBasicFuncButton = 1;    
+    snoozeBasicFuncButton = 1;
 }
 
 void IRAM_ATTR stopAlarmButtonPush() {
