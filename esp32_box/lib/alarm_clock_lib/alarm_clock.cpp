@@ -10,6 +10,8 @@
 
 #define uS_TO_M_FACTOR 60000000                 // Conversion factor for micro seconds to minutes
 #define ms_TO_M_FACTOR 60000                    // Conversion factor for milli seconds to minutes
+#define uS_TO_S_FACTOR 1000000                  // Conversion factor for micro seconds to seconds
+#define ms_TO_S_FACTOR 1000                     // Conversion factor for milli seconds to seconds
 #define WAKE_UP_TIMEOUT 300000                  // 300000 = 5 minutes, 1800000 = 30 minutes
 #define FSR_THRESHOLD 200                       // FSR sensitivity to pressure threshold
 #define ALARM_WINDOW 30                         // The constant window for predicting wake up time in minutes
@@ -33,6 +35,7 @@ time_t now;
 time_t epochTimeSec;
 struct tm wakeUpWindow;
 struct tm currentTime;
+int wakeUpDay = 0;
 double timeRemaining;
 unsigned long deepSleepMillis;
 boolean regularWakeUpSetting;
@@ -82,6 +85,7 @@ LiquidCrystal_I2C lcd(0x27, 20, 2);
 
 /* Set the time of the wake up window (specified time is the end of the window)*/
 void setWakeUp(int Hour, int Minute, int Day) {
+    stopAlarmButton = 0;
     epochTimeSec = timeClient.getEpochTime();
     memcpy(&currentTime, localtime(&epochTimeSec), sizeof(struct tm));
 
@@ -102,16 +106,6 @@ void setWakeUp(int Hour, int Minute, int Day) {
     }
     Serial.print("Difference in days from now to wakeup time: ");
     Serial.println(dayDiff);
-
-    // wDayMon = currentTime.tm_mday + dayDiff;
-    // wMonth = currentTime.tm_mon + MONTH_GAP_CONSTANT;
-    // wYear = currentTime.tm_year + YEAR_GAP_CONSTANT;
-    // Serial.print("wake up time day of month: ");
-    // Serial.println(wDayMon);
-    // Serial.print("wake up time month: ");
-    // Serial.println(wMonth);
-    // Serial.print("wake up time year: ");
-    // Serial.println(wYear);
     
     if(wDayMon > 28) {
         Serial.println("[][][][][]setWakeUp(), 1.0");
@@ -153,8 +147,7 @@ void setWakeUp(int Hour, int Minute, int Day) {
 }
 
 /* Set all other configurations of alarm clock*/
-void setAlarmConfig(boolean alarmSetOn, boolean regularWakeUp, boolean snoozeBasicFunc, boolean sleepCycle, boolean wakeUpConfirmation, boolean sound, boolean light, boolean vibration) {
-    alarmSetOnSetting = alarmSetOn;
+void setAlarmConfig(boolean regularWakeUp, boolean snoozeBasicFunc, boolean sleepCycle, boolean wakeUpConfirmation, boolean sound, boolean light, boolean vibration) {
     regularWakeUpSetting = regularWakeUp;
     snoozeBasicFuncSetting = snoozeBasicFunc;
     sleepCycleSetting = sleepCycle;
@@ -259,7 +252,18 @@ void triggerWakeUp(int currH, int currM, float Dpredict) {
             Serial.println("@@@@@triggerWakeUp(), 1.3");
             if(Dpredict < 1) {/* Stages 3-5 of sleep cycle, don't wake up unless the wake up time is due*/
                 Serial.println("@@@@@triggerWakeUp(), 1.3.1");
-                if((currH == wakeUpWindow.tm_hour) && (currM == wakeUpWindow.tm_min) && firstTimeSignalOn == 1){
+                // Serial.print("currH: ");
+                // Serial.println(currH);
+                // Serial.print("wakeUpWindow.tm_hour: ");
+                // Serial.println(wakeUpWindow.tm_hour);
+                // Serial.print("currM: ");
+                // Serial.println(currM);
+                // Serial.print("wakeUpWindow.tm_min: ");
+                // Serial.println(wakeUpWindow.tm_min);
+                // Serial.print("firstTimeSignalOn: ");
+                // Serial.println(firstTimeSignalOn);
+
+                if((currH == wakeUpWindow.tm_hour) && ((currM + 1) == wakeUpWindow.tm_min) && firstTimeSignalOn == 1){
                     Serial.println("@@@@@triggerWakeUp(), 1.3.1.1");
                     alarmOn = 1; 
                     deepSleepMillis = millis();
@@ -364,25 +368,36 @@ void startAlarmState() {
 
     if (wakeUpConfirmationSetting == 1) {
         Serial.println("$$$$$startAlarmState(), 1.0");
-        Serial.print("Stop button: ");
+        Serial.print("/////Stop button: ");
         Serial.println(stopAlarmButton);
+        Serial.print("/////Snooze Setting: ");
+        Serial.println(snoozeBasicFuncSetting);
+        Serial.print("/////Snooze button: ");
+        Serial.println(snoozeBasicFuncButton);
+
         if(!(checkSumFSR(FSRData1, FSRData2, FSRData3, FSRData4, FSRData5)) && stopAlarmButton == 1) {
             Serial.println("$$$$$startAlarmState(), 1.1");
             alarmOn = 0;
+            alarmSetOnSetting = 0;
             inWindow = 0;
             firstTimeSignalOn = 1;
             vibrate = 0;
             ESPSend(2);
             return;
         }
-        else if(snoozeBasicFuncSetting == 1 && snoozeBasicFuncButton == 1){
+        else if(checkSumFSR(FSRData1, FSRData2, FSRData3, FSRData4, FSRData5) && stopAlarmButton == 1) {
             Serial.println("$$$$$startAlarmState(), 1.2");
+            startActuators(actuatorsSwitch);
+            return; 
+        }
+        else if(snoozeBasicFuncSetting == 1 && snoozeBasicFuncButton == 1){
+            Serial.println("$$$$$startAlarmState(), 1.3");
             snoozeBasicFunc();   
             snoozeBasicFuncButton = 0;
             return;                     
         }
         else if(alarmOn == 1) {
-            Serial.println("$$$$$startAlarmState(), 1.3");
+            Serial.println("$$$$$startAlarmState(), 1.4");
             startActuators(actuatorsSwitch);
             return;        
         }
@@ -394,6 +409,7 @@ void startAlarmState() {
         if(stopAlarmButton == 1) {
             Serial.println("$$$$$startAlarmState(), 2.1");
             alarmOn = 0;
+            alarmSetOnSetting = 0;
             inWindow = 0;
             firstTimeSignalOn = 1;
             stopAlarmButton = 0;
@@ -417,37 +433,52 @@ void startAlarmState() {
 }
 
 void snoozeBasicFunc() {
-    unsigned long currentTime = millis();
+    unsigned long currentSnoozeTime = millis();
     alarmOn = 0;
     snoozeBasicFuncOn = 1;
     Serial.println("*****snoozeBasicFunc(), 0");
     
-    while(currentTime <= (snoozeBasicFuncPERIOD * ms_TO_M_FACTOR)) {
+    while(currentSnoozeTime <= (snoozeBasicFuncPERIOD * ms_TO_M_FACTOR)) {
         Serial.println("*****snoozeBasicFunc(), 1.0");
         timeClient.update();
         lcd.clear();
         lcd.print(timeClient.getFormattedTime());
         lcd.setCursor(0, 1);
         lcd.print("Snooze: ");
-        lcd.print(snoozeBasicFuncPERIOD);
-        lcd.print(" min.");
+        lcd.print(((snoozeBasicFuncPERIOD * 60) - (currentSnoozeTime / ms_TO_S_FACTOR)));
+        lcd.print(" sec.");
 
-        
-        currentTime = millis();
         delay(1000);
     }
+
     alarmOn = 1;
     snoozeBasicFuncOn = 0;
 }
 
 void IRAM_ATTR snoozeButtonPush() {
-    Serial.println("*****snooze Button press");
-    snoozeBasicFuncButton = 1;
+    if(snoozeBasicFuncButton == 0) {
+        Serial.println("*****snooze Button press");
+        snoozeBasicFuncButton = 1;
+    }
+    delay(50);
+    // making sure there are no phantom button clicks
+    if(snoozeBasicFuncButton == 0) {
+        Serial.println("*****snooze Button press");
+        snoozeBasicFuncButton = 1;
+    }    
 }
 
 void IRAM_ATTR stopAlarmButtonPush() {
-    Serial.println("*****Stop Alarm button press");
-    stopAlarmButton = 1;    
+    if(stopAlarmButton == 0) {
+        Serial.println("*****Stop Alarm button press");
+        stopAlarmButton = 1;
+    }
+    delay(50);
+    // making sure there are no phantom button clicks
+    if(stopAlarmButton == 0) {
+        Serial.println("*****Stop Alarm button press");
+        stopAlarmButton = 1;
+    }    
 }
 
 void buzzerAction() {
@@ -535,64 +566,109 @@ int defineActuators(boolean sound, boolean light, boolean vibration) {
 // All actuator functionality happens here - voice, light, vibration
 void startActuators(int actuMode) {   
     Serial.println("Wake Up!!!!");
-    if(stopAlarmButton == 0) {
-        switch (actuMode) {
-        case 0:
-            Serial.println("!!!!!startActuators(), case 0");
-            vibrationAction();
-            buzzerAction();
-            lightAction();
-            
-            break;
+    switch (actuMode) {
+    case 0:
+        Serial.println("!!!!!startActuators(), case 0");
+        vibrationAction();
+        buzzerAction();
+        lightAction();
         
-        case 1:
-            Serial.println("!!!!!startActuators(), case 1");
-            buzzerAction();
-            lightAction();
-            break;
+        break;
+    
+    case 1:
+        Serial.println("!!!!!startActuators(), case 1");
+        buzzerAction();
+        lightAction();
+        break;
 
-        case 2:
-            Serial.println("!!!!!startActuators(), case 2");
-            vibrationAction();
-            buzzerAction();
-            
-            break;
+    case 2:
+        Serial.println("!!!!!startActuators(), case 2");
+        vibrationAction();
+        buzzerAction();
+        
+        break;
 
-        case 3:
-            Serial.println("!!!!!startActuators(), case 3");
-            lightAction();
-            vibrationAction();
-            break;
-        
-        case 4:
-            Serial.println("!!!!!startActuators(), case 4");
-            buzzerAction();
-            break;
-        
-        case 5:
-            Serial.println("!!!!!startActuators(), case 5");
-            lightAction();
-            break;
-        
-        case 6:
-            Serial.println("!!!!!startActuators(), case 6");
-            vibrationAction();
-            break;
-        
-        case 7:
-            Serial.println("!!!!!startActuators(), case 7");
-            break;
-        default:
-            Serial.println("Error activating actuators");
-            break;
-        }
+    case 3:
+        Serial.println("!!!!!startActuators(), case 3");
+        lightAction();
+        vibrationAction();
+        break;
+    
+    case 4:
+        Serial.println("!!!!!startActuators(), case 4");
+        buzzerAction();
+        break;
+    
+    case 5:
+        Serial.println("!!!!!startActuators(), case 5");
+        lightAction();
+        break;
+    
+    case 6:
+        Serial.println("!!!!!startActuators(), case 6");
+        vibrationAction();
+        break;
+    
+    case 7:
+        Serial.println("!!!!!startActuators(), case 7");
+        break;
+    default:
+        Serial.println("Error activating actuators");
+        break;
     }
-    else return;
+    return;
 }
 
 
 
         
+
+    //  for(i = (snoozeBasicFuncPERIOD * 60); i == 0;) {
+    //     currentSnoozeTime = millis();
+    //     i = (snoozeBasicFuncPERIOD * 60) - (currentSnoozeTime / ms_TO_S_FACTOR);
+
+    //     Serial.println("*****snoozeBasicFunc(), 1.0");
+    //     timeClient.update();
+    //     lcd.clear();
+    //     lcd.print(timeClient.getFormattedTime());
+    //     lcd.setCursor(0, 1);
+    //     lcd.print("Snooze: ");
+    //     lcd.print(((snoozeBasicFuncPERIOD * 60) - currentSnoozeTime));
+    //     lcd.print(" sec.");
+
+    //     delay(1000);
+    // }
+
+
+
+    // while(currentSnoozeTime <= (snoozeBasicFuncPERIOD * ms_TO_M_FACTOR)) {
+    //     Serial.println("*****snoozeBasicFunc(), 1.0");
+    //     timeClient.update();
+    //     lcd.clear();
+    //     lcd.print(timeClient.getFormattedTime());
+    //     lcd.setCursor(0, 1);
+    //     lcd.print("Snooze: ");
+    //     lcd.print(((snoozeBasicFuncPERIOD * 60) - currentSnoozeTime));
+    //     lcd.print(" sec.");
+
+        
+    //     currentSnoozeTime = millis();
+    //     delay(1000);
+    // }
+
+// epochTimeSec = timeClient.getEpochTime();
+    // memcpy(&currentTime, localtime(&epochTimeSec), sizeof(struct tm));
+
+    // int snoozeHour = currentTime.tm_hour;
+    // int snoozeMin = currentTime.tm_min;
+    
+    // if((snoozeMin + snoozeBasicFuncPERIOD) > 60) {
+    //     snoozeHour += 1;
+    //     snoozeMin = (snoozeMin + snoozeBasicFuncPERIOD) % 60;
+    // }
+
+    // setWakeUp(snoozeHour, snoozeMin, wakeUpDay);
+    // alarmSetOnSetting = 1;
         
 // if(soundSetting == 1) {
 //     buzzerAction();

@@ -17,9 +17,11 @@ extern const int RELAY;
 extern boolean alarmOn;
 extern boolean firstTimeSignalOn;
 extern float DToServer;
+extern boolean alarmSetOnSetting;
 extern boolean regularWakeUpSetting;
 extern unsigned long deepSleepMillis;
 extern struct tm wakeUpWindow;
+extern int wakeUpDay;
 extern boolean inWindow;
 extern int snoozeBasicFuncButton;
 extern int stopAlarmButton;
@@ -41,7 +43,7 @@ void ESPSend(int state);
 
 void setWakeUp(int Hour, int Minute, int Day);  
 
-void setAlarmConfig(boolean alarmSetOn, boolean classicWakeUp, boolean snooze, boolean sleepCycle, boolean wakeUpConfirmation, boolean sound, boolean light, boolean vibration);
+void setAlarmConfig(boolean classicWakeUp, boolean snooze, boolean sleepCycle, boolean wakeUpConfirmation, boolean sound, boolean light, boolean vibration);
 
 void setStopAlarmFromMobile(boolean stopAlarmfromMobile);
 

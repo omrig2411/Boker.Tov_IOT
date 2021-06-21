@@ -46,7 +46,7 @@ const char MQTT_PASSWORD[] PROGMEM  = AIO_KEY;
 // PIR module and button ports      
 const int PIR = 27;
 const int SNOOZEBUTTON = 18;
-const int STOPBUTTON = 5;
+const int STOPBUTTON = 4;
         
 // timer variables
 unsigned long now_M = millis();
@@ -64,8 +64,6 @@ boolean reSendvib = 0;
 // MQTT user wake-up preferences variables
 int wakeUpHour = 12;
 int wakeUpMinute = 0;
-int wakeUpDay = 0;
-boolean alarmSet = 0;
 boolean regularWakeUp = 0;
 boolean snooze = 0;
 boolean sleepCycle = 0;
@@ -259,7 +257,8 @@ void startSNTP() {
 
 //callback upon sending data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  // status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail";
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
 //callback upon recieving data
@@ -288,7 +287,7 @@ void updateLCDDisplay() {
     
     lcd.setCursor(0, 1);
     
-    if((alarmSet == 1) && (alarmOn == 0)) {
+    if((alarmSetOnSetting == 1) && (alarmOn == 0)) {
       lcd.print("alarm: ");
       if(wakeUpHour <= 9) {
         lcd.print(0);
@@ -300,11 +299,11 @@ void updateLCDDisplay() {
       }
       lcd.print(wakeUpMinute);
     }
-    else if((alarmSet == 0) && (alarmOn == 0)) {
+    else if((alarmSetOnSetting == 0) && (alarmOn == 0)) {
       lcd.print("alarm: ");
       lcd.print("not set");
     }
-    else if((alarmSet == 1) && (alarmOn == 1)) {
+    else if((alarmSetOnSetting == 1) && (alarmOn == 1)) {
       lcd.print("Wake UP!!!");
     }
 }
@@ -446,8 +445,8 @@ void fetchJsonServer(byte* payload) {
 
   // Fetch server feed values
   if(doc["A"] == "F") {                 // Active alarm - True/False 
-    alarmSet = 0;
-  }else alarmSet = 1;
+    alarmSetOnSetting = 0;
+  }else alarmSetOnSetting = 1;
   wakeUpHour = doc["H"];                // Wake up hour - int between 0 and 23 
   wakeUpMinute = doc["M"];              // Wake up minute - int between 0 and 59
   wakeUpDay = doc["D"];                 // Wake up Day - int between 0 and 6
@@ -481,7 +480,7 @@ void fetchJsonServer(byte* payload) {
 
   // Store jason data in appropriate variables
   setWakeUp(wakeUpHour, wakeUpMinute, wakeUpDay);
-  setAlarmConfig(alarmSet, regularWakeUp, snooze, sleepCycle, wakeUpConfirmation, sound, light, vibration);
+  setAlarmConfig(regularWakeUp, snooze, sleepCycle, wakeUpConfirmation, sound, light, vibration);
 }
 
 void fetchJsonMobile(byte* payload) {

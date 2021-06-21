@@ -136,22 +136,23 @@ void connectESPNow() {
 
 //callback upon sending data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail";
+  Serial.print("\r\n@@@@@ Last Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
 //callback upon recieving data
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&incomingMessage, incomingData, sizeof(incomingMessage));
-  Serial.print("Bytes recieved: ");
+  Serial.print("@@@@@ Bytes recieved: ");
   Serial.println(len);
   startDataCollection = incomingMessage.startSensors;
-  Serial.print("before data recv fuction: ");
+  Serial.print("@@@@@ before data recv fuction: ");
   Serial.println(goToSleep);
   goToSleep = incomingMessage.goToSleep;
-  Serial.print("after data recv fuction: ");
+  Serial.print("@@@@@ after data recv fuction: ");
   Serial.println(goToSleep);
   vibrate = incomingMessage.startVibrationMotors;
-  Serial.print("Vibration value: ");
+  Serial.print("@@@@@ Vibration value: ");
   Serial.println(vibrate);
 }
 
@@ -298,5 +299,5 @@ void loop() {
   
   ESPGoToSleep();
 
-  delay(800);
+  delay(1000);
 }
