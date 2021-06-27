@@ -168,7 +168,7 @@ void ESPSend() {
   } else outGoingReadings.reSend = 0;
   if(incomingMessage.startVibrationMotors == 1) {
     outGoingReadings.reSendvib = 1;
-  }
+  } else outGoingReadings.reSendvib = 0;
   
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &outGoingReadings, sizeof(outGoingReadings));
   if(result != ESP_OK) {
@@ -290,7 +290,7 @@ void loop() {
     int i;
     for(i = 0; i <= 3; i++) {
       digitalWrite(vibrationMotorsPin, HIGH);
-      delay(500);
+      delay(200);
       digitalWrite(vibrationMotorsPin, LOW);
     } 
   }

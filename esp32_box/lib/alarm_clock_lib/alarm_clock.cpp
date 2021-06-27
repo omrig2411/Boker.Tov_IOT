@@ -16,7 +16,7 @@
 #define FSR_THRESHOLD 200                       // FSR sensitivity to pressure threshold
 #define ALARM_WINDOW 30                         // The constant window for predicting wake up time in minutes
 #define EMPTY_BED_THRESHOLD 200                 // Threshold for FSr sensors on bed, if input < threshold then bed is empty
-#define snoozeBasicFuncPERIOD 1                 // Set duration for snoozeBasicFunc
+#define snoozeBasicFuncPERIOD 0.2               // Set duration for snoozeBasicFunc
 #define BUZZER 25                               // Buzzer pin
 #define BUZZER_CHANNEL 0                        // Buzzer channel
 #define YEAR_GAP_CONSTANT 1900                  // The year constant to subtract to calculate epoch
@@ -333,7 +333,7 @@ void saveValues() {
 }
 
 float Dpredict() {
-    float P = 0.2; // P constant
+    float P = 0.25; // P constant
     
     saveValues();
     
@@ -420,6 +420,7 @@ void startAlarmState() {
         else if(snoozeBasicFuncSetting == 1 && snoozeBasicFuncButton == 1) {
             Serial.println("$$$$$startAlarmState(), 2.2");
             snoozeBasicFunc();
+            snoozeBasicFuncButton = 0;
             return;
         }
         else if(alarmOn == 1) {
@@ -433,26 +434,29 @@ void startAlarmState() {
 }
 
 void snoozeBasicFunc() {
+    unsigned long startSnoozeTime = millis();
     unsigned long currentSnoozeTime = millis();
     alarmOn = 0;
     snoozeBasicFuncOn = 1;
     Serial.println("*****snoozeBasicFunc(), 0");
-    
-    while(currentSnoozeTime <= (snoozeBasicFuncPERIOD * ms_TO_M_FACTOR)) {
+
+    for(; (currentSnoozeTime / ms_TO_S_FACTOR) <= ((startSnoozeTime / ms_TO_S_FACTOR) + (snoozeBasicFuncPERIOD * 60));) {
+        currentSnoozeTime = millis();
+        int snoozeTimePrint = 1 + ((startSnoozeTime / ms_TO_S_FACTOR) + (snoozeBasicFuncPERIOD * 60)) - (currentSnoozeTime / ms_TO_S_FACTOR);
+
         Serial.println("*****snoozeBasicFunc(), 1.0");
         timeClient.update();
         lcd.clear();
         lcd.print(timeClient.getFormattedTime());
         lcd.setCursor(0, 1);
         lcd.print("Snooze: ");
-        lcd.print(((snoozeBasicFuncPERIOD * 60) - (currentSnoozeTime / ms_TO_S_FACTOR)));
+        lcd.print(snoozeTimePrint);
         lcd.print(" sec.");
 
         delay(1000);
     }
 
     alarmOn = 1;
-    snoozeBasicFuncOn = 0;
 }
 
 void IRAM_ATTR snoozeButtonPush() {

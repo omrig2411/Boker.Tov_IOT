@@ -23,6 +23,8 @@
 #define WIFI_TIMEOUT_MS 5000        // Time to try connecting to wifi until timeout (in miliseconds)
 #define TIME_ASLEEP  1              // Duration of time ESP32 will be asleep (in minutes)
 #define TIME_AWAKE 5                // Duration of time ESP32 will be awake (in minutes)
+#define RXD2 16                     // Mp3 module RX port for UART serial connection
+#define TXD2 17                     // Mp3 module TX port for UART serial connection
 
 //loop function counter
 int loopCounter = 0;
@@ -257,7 +259,7 @@ void startSNTP() {
 
 //callback upon sending data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.print("Last Packet Send Status:\t");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
@@ -522,6 +524,7 @@ void checkSubscription() {
 
 void setup() {
   Serial.begin(115200);
+  Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
   deepSleepMillis = millis();
   wakeUpWindow.tm_hour = 12;
   wakeUpWindow.tm_min = 0;
